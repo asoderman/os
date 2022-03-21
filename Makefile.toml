@@ -1,0 +1,145 @@
+[env]
+output_dir="uefi_boot_partition"
+bootloader_manifest = "../kloader/Cargo.toml"
+bootloader_cargo_config = "../kloader/.cargo/config.toml"
+bootloader_build_dir = "bootloader"
+bootloader_src_dir = "../kloader/"
+qemu_success_value = 33
+# Cargo make does not play nice with non 0 exit codes 
+# so we invoke the test setup directly
+qemu_test_command = "qemu-system-x86_64 -bios /usr/share/ovmf/OVMF.fd -drive file=fat:rw:${output_dir},format=raw -nographic --no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04"
+[tasks.build_bootloader]
+command = "cargo"
+args = ["build", "--manifest-path", "${bootloader_manifest}", 
+        "--config", "${bootloader_cargo_config}",
+        "--target-dir", "${bootloader_build_dir}",
+        "-Z", "unstable-options"]
+
+[tasks.cp_bootloader]
+dependencies = ["fat_dirs"]
+command = "cp"
+args = ["${bootloader_build_dir}/x86_64-unknown-uefi/debug/kloader.efi",
+        "${output_dir}/EFI/BOOT/BOOTX64.efi"
+        ]
+
+# Cargo currently cannot find the uefi bootloader linker script because manifest path does not change cwd (yet)
+#[tasks.bootloader]
+#dependencies = ["build_bootloader", "cp_bootloader"]
+
+[tasks.clean]
+command = "rm"
+args = ["-rf", "${output_dir}"]
+
+[tasks.bootloader]
+dependencies = ["clean"]
+command = "./build_bootloader.sh"
+args = ["${bootloader_src_dir}"]
+
+[tasks.update_kernel]
+command = "cp"
+args = ["-r",
+        "${@}",
+        "${output_dir}/kernel/kernel.elf"
+        ]
+
+[tasks.gdb]
+command = "gdb"
+args = ["-x", "debug.gdb"]
+
+[tasks.runner]
+run_task = {name = ["is_test_bin"]}
+
+[tasks.is_test_bin]
+private = true
+script_runner = "python3"
+script_extension = "py"
+script = '''
+import os
+import subprocess as sp
+import sys
+path = sys.argv[1]
+command = os.getenv('qemu_test_command')
+success_value = int(os.getenv('qemu_success_value'))
+print(path)
+if "deps" in path:
+    sp.run(f'cargo make update_kernel {path}'.split(' '))
+    status = sp.run(command.split(' '))
+    print(f'\nexit: {status.returncode}')
+    if status.returncode == success_value:
+        sys.exit(0)
+else:
+    os.system(f'cargo make qemu {path}')
+'''
+
+[tasks.qemu]
+ignore_errors = true
+dependencies = ["update_kernel"]
+command = "qemu-system-x86_64"
+args= [ "-bios",
+        "/usr/share/ovmf/OVMF.fd",
+        "-drive",
+        "file=fat:rw:${output_dir},format=raw",
+        "-serial",
+        "stdio",
+        "-no-shutdown",
+        "--no-reboot"
+      ]
+
+[tasks.monitor]
+ignore_errors = true
+command = "qemu-system-x86_64"
+args= [ "-bios",
+        "/usr/share/ovmf/OVMF.fd",
+        "-drive",
+        "file=fat:rw:${output_dir},format=raw",
+        "-D",
+        "log.txt",
+        "-d",
+        "int",
+        "-monitor",
+        "stdio",
+        "-no-shutdown",
+        "--no-reboot"
+      ]
+
+[tasks.debug]
+ignore_errors = true
+command = "qemu-system-x86_64"
+args= [ "-bios",
+        "/usr/share/ovmf/OVMF.fd",
+        "-drive",
+        "file=fat:rw:${output_dir},format=raw",
+        "-s",
+        "-S",
+        "-D",
+        "log.txt",
+        "-d",
+        "int",
+        "-no-shutdown",
+        "--no-reboot"
+      ]
+
+[tasks.qemu_text]
+ignore_errors = true
+command = "qemu-system-x86_64"
+args= [ "-bios",
+        "/usr/share/ovmf/OVMF.fd",
+        "-drive",
+        "file=fat:rw:${output_dir},format=raw",
+        "-nographic",
+        "-no-shutdown",
+        "--no-reboot"
+      ]
+
+[tasks.qemu_test]
+dependencies = ["update_kernel"]
+command = "qemu-system-x86_64"
+args= [ "-bios",
+        "/usr/share/ovmf/OVMF.fd",
+        "-drive",
+        "file=fat:rw:${output_dir},format=raw",
+        "-nographic",
+        "--no-reboot",
+        "-device",
+        "isa-debug-exit,iobase=0xf4,iosize=0x04"
+      ]
