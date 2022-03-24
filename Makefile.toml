@@ -7,7 +7,8 @@ bootloader_src_dir = "../kloader/"
 qemu_success_value = 33
 # Cargo make does not play nice with non 0 exit codes 
 # so we invoke the test setup directly
-qemu_test_command = "qemu-system-x86_64 -bios /usr/share/ovmf/OVMF.fd -drive file=fat:rw:${output_dir},format=raw -nographic --no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04"
+qemu_test_command = "qemu-system-x86_64 -bios /usr/share/ovmf/OVMF.fd -drive file=fat:rw:${output_dir},format=raw -nographic -d int -D log.txt --no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04"
+
 [tasks.build_bootloader]
 command = "cargo"
 args = ["build", "--manifest-path", "${bootloader_manifest}", 
