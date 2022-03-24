@@ -159,7 +159,7 @@ mod test {
             v.push(v2);
         }
 
-        let another_vec = alloc::vec![0u8; 4000];
+        //let another_vec = alloc::vec![0u8; 4000];
 
         let a_third_vec = alloc::vec![0u8; 1000];
 

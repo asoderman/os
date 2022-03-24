@@ -4,6 +4,7 @@
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![feature(ptr_as_uninit)]
+#![feature(abi_x86_interrupt)]
 #![test_runner(test_runner)]
 
 #![reexport_test_harness_main = "test_main"]
@@ -13,11 +14,14 @@ extern crate alloc;
 mod arch;
 mod dev;
 mod heap;
+mod info;
+mod interrupt;
 mod pmm;
 mod qemu;
 mod vmm;
 #[cfg(test)]
 mod test;
+#[macro_use]
 mod util;
 
 use core::panic::PanicInfo;
@@ -44,6 +48,7 @@ extern "C" fn start(bootinfo: *const KernelInfo) {
 
 fn main(bootinfo: &KernelInfo) {
     static_assert(!bootinfo.mem_map_info.start.is_null(), "Mem map null ptr");
+    util::set_stack_start(bootinfo.rsp);
 
     let heap_init_result =
         init_heap(bootinfo.mem_map_info, VirtAddr::new(bootinfo.phys_offset))
@@ -52,15 +57,21 @@ fn main(bootinfo: &KernelInfo) {
             panic!();
         });
 
+    println!("=== {} {} ===\n", info::KERNEL_NAME, info::KERNEL_VERSION);
+    println!("start RSP: {:#X}", bootinfo.rsp);
+    println!("RSP after heap init: {:#X}", util::get_rsp());
+    println!("est stack usage: {:#X}", bootinfo.rsp - util::get_rsp());
     println!("Heap size: {}", heap_init_result.1 - heap_init_result.0);
 
     init_pmm(heap_init_result);
+    println!("Initializing interrupts");
+    println!("est stack usage: {:#X}", bootinfo.rsp - util::get_rsp());
+    interrupt::init().unwrap_or_else(|_| {
+        println!("Unable to initialize interrupts");
+    });
 
     #[cfg(test)]
     test_main();
-
-    println!("prinln! test: {}", "Hello world!");
-    println!("prinln! test2: {}", 2);
 
     loop {}
 }

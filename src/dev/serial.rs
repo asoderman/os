@@ -36,6 +36,13 @@ impl Write for Serial {
     }
 }
 
+pub fn print(args: core::fmt::Arguments) {
+    use core::fmt::Write;
+    crate::interrupt::without_interrupts(|| {
+        SERIAL_OUT.lock().write_fmt(args).unwrap()
+    });
+}
+
 pub fn write_serial_out(s: &str) {
     let mut p = PortWriteOnly::new(COM1);
     for b in s.bytes() {
