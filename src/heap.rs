@@ -6,7 +6,7 @@ use libkloader::MemoryMapInfo;
 use spin::{Mutex, MutexGuard};
 use crate::arch::VirtAddr;
 
-use crate::{dev::serial::write_serial_out, pmm::get_init_heap_section};
+use crate::{dev::serial::write_serial_out, mm::get_init_heap_section};
 
 use linked_list_allocator::LockedHeap;
 
@@ -110,7 +110,7 @@ pub fn init_heap(
     mem_map: MemoryMapInfo,
     phys_offset: VirtAddr,
 ) -> Result<(VirtAddr, VirtAddr), HeapInitError> {
-    let heap_frame_range = get_init_heap_section(4, mem_map).map_err(|e| HeapInitError(e))?;
+    let heap_frame_range = get_init_heap_section(16, mem_map).map_err(|e| HeapInitError(e))?;
 
     let heap_start = phys_offset.as_u64() + heap_frame_range.start.start_address().as_u64();
     let heap_end_exclusive = phys_offset + heap_frame_range.end.start_address().as_u64();
@@ -153,19 +153,11 @@ mod test {
     fn test_many_small_alloc() {
         let mut v = Vec::new();
 
-        for _ in 0..255 {
+        for _ in 0..150 {
             let v2 = alloc::vec![5u8; 10];
 
             v.push(v2);
         }
-
-        //let another_vec = alloc::vec![0u8; 4000];
-
-        let a_third_vec = alloc::vec![0u8; 1000];
-
-        let a_fourth_vec = alloc::vec![0u8; 1000];
-
-        assert!(super::ALLOC.lock().free() < 500, "The heap is not close to maxing out. Did heap size increase?");
 
         v.clear();
 

@@ -5,22 +5,24 @@
 #![feature(custom_test_frameworks)]
 #![feature(ptr_as_uninit)]
 #![feature(abi_x86_interrupt)]
+#![feature(map_first_last)]
 #![test_runner(test_runner)]
 
 #![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
 
+mod acpi;
 mod arch;
 mod dev;
 mod heap;
 mod info;
 mod interrupt;
-mod pmm;
+mod mm;
 mod qemu;
-mod vmm;
 #[cfg(test)]
 mod test;
+mod traits;
 #[macro_use]
 mod util;
 
@@ -31,7 +33,6 @@ use x86_64::VirtAddr;
 
 use dev::serial::write_serial_out;
 use heap::init_heap;
-use pmm::init_pmm;
 
 fn static_assert(b: bool, msg: &str) {
     if !b {
@@ -63,12 +64,13 @@ fn main(bootinfo: &KernelInfo) {
     println!("est stack usage: {:#X}", bootinfo.rsp - util::get_rsp());
     println!("Heap size: {}", heap_init_result.1 - heap_init_result.0);
 
-    init_pmm(heap_init_result);
+    mm::init(heap_init_result, bootinfo);
     println!("Initializing interrupts");
     println!("est stack usage: {:#X}", bootinfo.rsp - util::get_rsp());
     interrupt::init().unwrap_or_else(|_| {
         println!("Unable to initialize interrupts");
     });
+
 
     #[cfg(test)]
     test_main();
