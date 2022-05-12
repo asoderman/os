@@ -132,7 +132,7 @@ impl MemoryManager {
     /// the pmm. The physical frame backing a freed page table will still be returned to the pmm
     pub fn kunmap_untracked(&mut self, vaddr: VirtAddr) {
 
-        self.unmap(vaddr);
+        let _ = self.unmap(vaddr);
         self.vmm.release_region(vaddr, 1);
         x86_64::instructions::tlb::flush(vaddr);
     }

@@ -41,7 +41,7 @@ pub fn allocate_kernel_stack() -> VirtAddr {
     };
 
     crate::println!("Allocating stack at base: {:?}", new_stack_base);
-    crate::mm::memory_manager().kmap(new_stack_base, KERNEL_STACK_SIZE_BYTES / PAGE_SIZE);
+    crate::mm::memory_manager().kmap(new_stack_base, KERNEL_STACK_SIZE_BYTES / PAGE_SIZE).expect("Could not map new stack");
 
     unsafe {
         // TODO: Implement a real kernel stack allocator

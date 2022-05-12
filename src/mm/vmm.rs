@@ -2,24 +2,24 @@ use core::ptr::NonNull;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering;
 
-use core::cmp;
+
 
 use alloc::collections::BTreeSet;
-use spin::RwLockReadGuard;
-use spin::RwLockWriteGuard;
+
+
 use x86_64::PhysAddr;
 use x86_64::structures::paging::PageTable;
-use x86_64::structures::paging::PageTableFlags;
 
-use crate::arch::x86_64::paging::MapError;
-use crate::arch::x86_64::paging::Mapper;
+
+
+
 use crate::arch::x86_64::VirtAddr;
 use crate::arch::PAGE_SIZE;
 
 use core::fmt::Debug;
 
-use lazy_static::lazy_static;
-use spin::RwLock;
+
+
 
 use super::pmm::phys_to_virt;
 use super::region::MemRegion;

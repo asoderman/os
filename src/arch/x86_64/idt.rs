@@ -20,6 +20,7 @@ impl IDTInfo {
 }
 
 /// Wraps the interrupt service routine in an extern "x86-interrupt" handler
+#[allow(unused_macros)]
 macro_rules! impl_x86_64_interrupt {
     ($isr:ident) => {
         paste! {
@@ -31,6 +32,7 @@ macro_rules! impl_x86_64_interrupt {
 }
 
 /// Implements a x86-interrupt abi wrapper around the isr then registers the x86 wrapped function
+#[allow(unused_macros)]
 macro_rules! impl_and_register_x86_interrupt {
     ($num:expr, $isr:ident) => {
         use paste::paste;

@@ -1,8 +1,8 @@
-use core::{arch::asm, sync::atomic::{AtomicBool, Ordering}};
+use core::{sync::atomic::{AtomicBool, Ordering}};
 
 use alloc::{collections::BTreeMap, vec::Vec};
 use spin::Mutex;
-use x86_64::{structures::{paging::PageTable, DescriptorTablePointer}, PhysAddr, VirtAddr};
+use x86_64::{PhysAddr, VirtAddr};
 
 use crate::{mm::{memory_manager, temp_page, TempPageGuard}, arch::PAGE_SIZE};
 

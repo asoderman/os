@@ -1,7 +1,6 @@
 use core::{
-    alloc::{AllocError, Allocator, GlobalAlloc, Layout},
-    ptr::NonNull,
-    sync::atomic::Ordering, };
+    alloc::{GlobalAlloc, Layout},
+    ptr::NonNull, };
 use libkloader::MemoryMapInfo;
 use spin::{Mutex, MutexGuard};
 use crate::arch::VirtAddr;
@@ -94,7 +93,7 @@ impl TinyAlloc {
         unsafe { NonNull::new(ptr.offset(align_needed as isize)).unwrap() }
     }
 
-    fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {}
+    fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
 }
 
 #[derive(Clone, Debug)]
@@ -126,6 +125,7 @@ pub fn init_heap(
     Ok((VirtAddr::new(heap_start), heap_end_exclusive))
 }
 
+#[cfg(test)]
 mod test {
     use alloc::vec::Vec;
 

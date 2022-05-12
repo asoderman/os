@@ -2,7 +2,7 @@ use core::{marker::PhantomData, ptr::NonNull};
 
 use alloc::vec::Vec;
 use x86_64::{
-    structures::paging::{page_table::PageTableEntry, PageTable, PhysFrame, PageTableIndex, PageTableFlags},
+    structures::paging::{page_table::PageTableEntry, PageTable, PageTableIndex, PageTableFlags},
     VirtAddr, PhysAddr,
 };
 
@@ -198,7 +198,7 @@ impl<'a> Mapper<'a> {
 
         // If we need multiple l2_pages
         if range_end > MAX_PAGE_ENTRIES {
-            let next_l2_end = range_end % 512;
+            let _next_l2_end = range_end % 512;
         }
 
         for i in map_range {
@@ -207,8 +207,8 @@ impl<'a> Mapper<'a> {
             if i % 512 == 0 && i != 0 {
                 self.ascend().unwrap();
                 self.increase_index(2).unwrap();
-                self.map_next(mm);
-                self.advance();
+                self.map_next(mm).unwrap();
+                self.advance().unwrap();
             }
             // TODO: remove hardcoded flags
             self.current()[i % 512].set_addr(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
@@ -231,7 +231,7 @@ mod test {
         let phys_offset_vaddr = phys_to_virt(PhysAddr::new(0));
         let pml4 = x86_64::registers::control::Cr3::read().0;
         let mm = memory_manager();
-        let mut pt = unsafe {
+        let pt = unsafe {
             mm.get_phys_as_mut(pml4.start_address()).unwrap()
         };
 

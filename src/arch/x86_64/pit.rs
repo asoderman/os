@@ -10,9 +10,11 @@ const MODE_COMMAND_REG: u16 = 0x43;
 // 1000.15255658 hz
 const RELOAD_VALUE_1KHZ: u16 = 1193;
 
-const fn PIT_TICK_RATE_HZ(reload_value: usize) -> usize {
+/*
+const fn pit_tick_rate_to_hz(reload_value: usize) -> usize {
     1193182 / reload_value
 }
+*/
 
 lazy_static! {
     pub static ref PIT: Mutex<Pit> = Mutex::new(

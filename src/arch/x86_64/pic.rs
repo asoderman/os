@@ -1,4 +1,4 @@
-use x86_64::instructions::port::{PortWriteOnly, Port};
+use x86_64::instructions::port::{Port};
 
 use lazy_static::lazy_static;
 

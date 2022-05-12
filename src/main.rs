@@ -34,7 +34,7 @@ mod util;
 
 use core::panic::PanicInfo;
 
-use libkloader::{KernelInfo, VideoInfo};
+use libkloader::{KernelInfo};
 use x86_64::VirtAddr;
 
 use dev::serial::write_serial_out;

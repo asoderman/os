@@ -116,8 +116,8 @@ pub fn init_smp(bootinfo: &KernelInfo) -> Result<(), CpuError> {
             apic_list_cores(info.processor_info.as_ref().unwrap());
             bsp!().lapic().set(Lapic::new(PhysAddr::new(apic.local_apic_address)));
             crate::println!("lapic id: {}", lapic_id());
-            bsp!().lapic().get_mut().initialize();
-            bsp!().lapic().get_mut().wake_core(1);
+            bsp!().lapic().get_mut().initialize().unwrap();
+            bsp!().lapic().get_mut().wake_core(1).unwrap();
         },
         _ => {
             return Err(CpuError::UnknownInterruptModel);

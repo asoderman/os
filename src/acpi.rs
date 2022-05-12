@@ -1,10 +1,10 @@
 use acpi::{AcpiHandler, PhysicalMapping, AcpiTables, PlatformInfo};
-use alloc::vec::Vec;
+
 
 use libkloader::KernelInfo;
 use x86_64::{align_up, align_down};
 
-use crate::mm::{MemoryManager, memory_manager};
+use crate::mm::{memory_manager};
 
 use crate::arch::{PhysAddr, VirtAddr, PAGE_SIZE};
 

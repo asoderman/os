@@ -15,7 +15,7 @@ fn no_op_isr(frame: InterruptStackFrame, index: u8, error_code: Option<u64>) {
     println!("Dummy ISR {:#X} e: {:#X?}: \n {:#?}", index, error_code, frame);
 }
 
-fn page_fault_err(frame: InterruptStackFrame, index: u8, error_code: Option<u64>) {
+fn page_fault_err(frame: InterruptStackFrame, _index: u8, error_code: Option<u64>) {
     let cr2 = x86_64::registers::control::Cr2::read();
     unsafe {
         let mut m = Mapper::new(cr2, get_kernel_context_virt().unwrap().as_mut());

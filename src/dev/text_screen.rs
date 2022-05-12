@@ -10,7 +10,7 @@ pub struct TextRenderer {
 }
 
 impl TextRenderer {
-    pub fn new(orig: Point) -> Self {
+    pub fn new(_orig: Point) -> Self {
         TextRenderer {
             orig: Point::default(),
         }

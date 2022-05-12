@@ -1,6 +1,6 @@
-use lazy_static::lazy_static;
+
 use spin::Mutex;
-use core::{fmt::{Write, Error}, convert::Infallible};
+use core::fmt::{Write, Error};
 
 use x86_64::instructions::port::PortWriteOnly;
 
@@ -37,7 +37,6 @@ impl Write for Serial {
 }
 
 pub fn print(args: core::fmt::Arguments) {
-    use core::fmt::Write;
     crate::interrupt::without_interrupts(|| {
         SERIAL_OUT.lock().write_fmt(args).unwrap()
     });

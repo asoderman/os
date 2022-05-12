@@ -1,4 +1,4 @@
-use core::cmp::Ordering;
+
 use core::sync::atomic::AtomicUsize;
 
 use crate::arch::{VirtAddr, PhysAddr, PAGE_SIZE};
@@ -7,8 +7,8 @@ use crate::error::Error;
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
-use libkloader::{MemoryMapInfo, KernelInfo};
-use libkloader::{uefi::MemoryType, MemoryDescriptor};
+use libkloader::{MemoryMapInfo};
+use libkloader::{MemoryDescriptor};
 
 use x86_64::structures::paging::frame::{PhysFrame, PhysFrameRange};
 use x86_64::structures::paging::page::Size4KiB;
@@ -464,7 +464,6 @@ pub fn get_init_heap_section(
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use super::super::*;
 
     #[test_case]

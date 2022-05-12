@@ -1,4 +1,4 @@
-use core::fmt::{Debug, Display};
+use core::fmt::{Debug};
 
 use alloc::boxed::Box;
 
