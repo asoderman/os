@@ -15,7 +15,6 @@ use crate::arch::x86_64::paging::MapError;
 use crate::arch::x86_64::paging::Mapper;
 use crate::arch::x86_64::VirtAddr;
 use crate::arch::PAGE_SIZE;
-use crate::traits::Region;
 
 use core::fmt::Debug;
 
@@ -23,6 +22,7 @@ use lazy_static::lazy_static;
 use spin::RwLock;
 
 use super::pmm::phys_to_virt;
+use super::region::MemRegion;
 
 static mut KERNEL_PAGE_TABLE: AtomicPtr<PageTable> = AtomicPtr::new(0 as *mut _);
 
@@ -34,7 +34,7 @@ struct VirtualRegion {
     end: VirtAddr,
 }
 
-impl Region for VirtualRegion {
+impl MemRegion for VirtualRegion {
     fn start(&self) -> usize {
         self.start.as_u64() as usize
     }
@@ -45,9 +45,9 @@ impl Region for VirtualRegion {
 }
 
 impl Ord for VirtualRegion {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         if self.overlaps(other) || self.contains(other) || self.within(other) {
-            cmp::Ordering::Equal
+            core::cmp::Ordering::Equal
         } else {
             self.start.cmp(&other.start)
         }
@@ -55,11 +55,11 @@ impl Ord for VirtualRegion {
 }
 
 impl PartialOrd for VirtualRegion {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         if self.start > other.end {
-            Some(cmp::Ordering::Greater)
+            Some(core::cmp::Ordering::Greater)
         } else if self.end < other.start {
-            Some(cmp::Ordering::Less)
+            Some(core::cmp::Ordering::Less)
         } else {
             None
         }
@@ -71,14 +71,13 @@ impl PartialEq for VirtualRegion {
         self.start == other.start && self.end == other.end
     }
 }
-
 impl Eq for VirtualRegion {}
 
 type Error = VirtualMemoryError;
 
 #[derive(Debug, Clone, Copy)]
 pub enum VirtualMemoryError {
-    RegionInUse,
+    RegionInUse(&'static str),
     UnmapNonPresent
 }
 
@@ -95,7 +94,7 @@ impl VirtualMemoryManager {
     }
 
     /// Attempts to reserve the specified region of virtual memory. If the region is unavailable
-    /// returns `Error`, The region will not necessarily be mapped
+    /// returns `Error`, The region may not necessarily be mapped
     pub fn reserve_region(&mut self, vaddr: VirtAddr, size: usize) -> Result<(), Error> {
         if self.reserved.insert(VirtualRegion {
             start: vaddr,
@@ -103,7 +102,7 @@ impl VirtualMemoryManager {
         }) {
             Ok(())
         } else {
-            Err(VirtualMemoryError::RegionInUse)
+            Err(VirtualMemoryError::RegionInUse(""))
         }
     }
 
@@ -127,7 +126,8 @@ pub fn init_vmm() {
     }
 }
 
-pub(super) fn get_kernel_context_virt() -> Option<NonNull<PageTable>> {
+// TODO: doesnt need to be pub should be pub(super)
+pub fn get_kernel_context_virt() -> Option<NonNull<PageTable>> {
     let paddr = unsafe { 
         PhysAddr::new(KERNEL_PAGE_TABLE.load(Ordering::SeqCst) as u64)
     };

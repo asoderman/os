@@ -1,5 +1,5 @@
 /// A trait containing helper functions for comparing regions of memory (Physical or Virtual)
-pub trait Region {
+pub trait MemRegion {
     fn start(&self) -> usize;
     fn end(&self) -> usize;
 
@@ -27,7 +27,13 @@ pub trait Region {
     /// A helper function that returns if self overlaps the other region at all
     fn overlaps(&self, other: &Self) -> bool {
         let end_overhang = other.contains_val(self.start()) && self.end() > other.end();
-        let start_overhang = self.start() < other.start() && other.contains_val(self.end());
+        // self.end() is the exclusive end
+        if self.end() == 0 {
+            crate::println!("self.end = {:X}", self.end());
+            crate::println!("self.start = {:X}", self.start());
+        }
+
+        let start_overhang = self.start() < other.start() && other.contains_val(self.end() - 1);
 
         start_overhang || end_overhang
     }

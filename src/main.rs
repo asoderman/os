@@ -6,23 +6,29 @@
 #![feature(ptr_as_uninit)]
 #![feature(abi_x86_interrupt)]
 #![feature(map_first_last)]
+#![feature(drain_filter)]
+#![feature(bool_to_option)]
 #![test_runner(test_runner)]
 
 #![reexport_test_harness_main = "test_main"]
+#![recursion_limit = "1024"]
 
 extern crate alloc;
 
 mod acpi;
 mod arch;
+#[macro_use]
+mod cpu;
 mod dev;
+mod error;
 mod heap;
 mod info;
 mod interrupt;
 mod mm;
 mod qemu;
+mod stack;
 #[cfg(test)]
 mod test;
-mod traits;
 #[macro_use]
 mod util;
 
@@ -49,7 +55,7 @@ extern "C" fn start(bootinfo: *const KernelInfo) {
 
 fn main(bootinfo: &KernelInfo) {
     static_assert(!bootinfo.mem_map_info.start.is_null(), "Mem map null ptr");
-    util::set_stack_start(bootinfo.rsp);
+    stack::set_stack_start(bootinfo.rsp);
 
     let heap_init_result =
         init_heap(bootinfo.mem_map_info, VirtAddr::new(bootinfo.phys_offset))
@@ -58,18 +64,27 @@ fn main(bootinfo: &KernelInfo) {
             panic!();
         });
 
+    arch::x86_64::platform_init();
+
     println!("=== {} {} ===\n", info::KERNEL_NAME, info::KERNEL_VERSION);
     println!("start RSP: {:#X}", bootinfo.rsp);
-    println!("RSP after heap init: {:#X}", util::get_rsp());
-    println!("est stack usage: {:#X}", bootinfo.rsp - util::get_rsp());
+    println!("RSP after heap init: {:#X}", stack::get_rsp());
+    println!("est stack usage: {:#X}", bootinfo.rsp - stack::get_rsp());
     println!("Heap size: {}", heap_init_result.1 - heap_init_result.0);
 
     mm::init(heap_init_result, bootinfo);
     println!("Initializing interrupts");
-    println!("est stack usage: {:#X}", bootinfo.rsp - util::get_rsp());
+    println!("est stack usage: {:#X}", bootinfo.rsp - stack::get_rsp());
     interrupt::init().unwrap_or_else(|_| {
         println!("Unable to initialize interrupts");
     });
+
+    cpu::init_smp(bootinfo).unwrap_or_else(|_| {
+        println!("Unable to initialize cpus");
+    });
+    println!("Processors: {}", cpu::cores());
+    println!("all: {:#?}", cpu::cpu_list());
+    println!("BSP: {:#?}", core!());
 
 
     #[cfg(test)]

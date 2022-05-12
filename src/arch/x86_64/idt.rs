@@ -46,7 +46,7 @@ pub fn init_idt() -> Result<(), ()> {
     crate::println!("enter init_idt");
     let idt = Box::new(InterruptDescriptorTable::new());
 
-    crate::util::print_stack_usage();
+    crate::stack::print_stack_usage();
     unsafe {
         IDT = Some(IDTInfo { ptr: idt, size: core::mem::size_of::<InterruptDescriptorTable>() });
         IDT.as_mut().ok_or(())?.get_idt_mut().reset();

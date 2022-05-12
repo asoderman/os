@@ -3,6 +3,8 @@ use core::sync::atomic::AtomicUsize;
 
 use crate::arch::{VirtAddr, PhysAddr, PAGE_SIZE};
 use crate::dev::serial::write_serial_out;
+use crate::error::Error;
+use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 use libkloader::{MemoryMapInfo, KernelInfo};
@@ -11,6 +13,8 @@ use libkloader::{uefi::MemoryType, MemoryDescriptor};
 use x86_64::structures::paging::frame::{PhysFrame, PhysFrameRange};
 use x86_64::structures::paging::page::Size4KiB;
 
+use super::region::MemRegion;
+
 
 static mut PHYS_OFFSET: AtomicUsize = AtomicUsize::new(0);
 
@@ -18,12 +22,24 @@ static mut PHYS_OFFSET: AtomicUsize = AtomicUsize::new(0);
 #[repr(u32)]
 enum Usage {
     Free = 0,
+    AcpiReclaim,
     KernelHeap,
     KernelCode,
     KernelStack,
     Misc,
     Reserved,
     Unusable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PhysicalMemoryError {
+    UnableToObtainPhysicalRegion
+}
+
+impl Error for PhysicalMemoryError {
+    fn source(&self) -> Option<&Box<dyn Error>> {
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -33,25 +49,15 @@ struct PhysicalRegion {
     usage: Usage
 }
 
-impl Ord for PhysicalRegion {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+impl MemRegion for PhysicalRegion {
+    fn start(&self) -> usize {
+        self.start.as_u64() as usize
+    }
+
+    fn end(&self) -> usize {
+        (self.start.as_u64() + self.frames as u64 * PAGE_SIZE as u64) as usize
     }
 }
-
-impl PartialOrd for PhysicalRegion {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.start.as_u64().cmp(&other.start.as_u64()))
-    }
-}
-
-impl PartialEq for PhysicalRegion {
-    fn eq(&self, other: &Self) -> bool {
-        self.start == other.start
-    }
-}
-
-impl Eq for PhysicalRegion {}
 
 impl PhysicalRegion {
     #[inline]
@@ -59,25 +65,38 @@ impl PhysicalRegion {
         self.usage == Usage::Free
     }
 
+    /*
     #[inline]
     fn contains(&self, paddr: PhysAddr) -> bool {
         self.start <= paddr && paddr < self.exclusive_end()
     }
+    */
 
+    /// Removes the specified sub region from self.
+    ///
+    /// # Returns
+    /// a tuple of (sub_region, (region before, region after))
     fn sub_region(mut self, start: PhysAddr, end: PhysAddr) -> (PhysicalRegion, (Option<PhysicalRegion>, Option<PhysicalRegion>)) {
+        crate::println!("getting sub region {:?} -> {:?}", start, end);
         let end_region_size = (self.exclusive_end() - end) / PAGE_SIZE as u64;
         let sub_region_size = (end - start) / PAGE_SIZE as u64;
         let end_region = self.split(end_region_size as u32);
+
         if self.start == start && self.frames as u64 == sub_region_size {
             (self, (None, end_region))
         } else {
             let sub_region = self.split(sub_region_size as u32);
+            crate::println!("sub region result {:?}", sub_region);
             (sub_region.unwrap(), (Some(self), end_region))
         }
     }
 
+    /// Splits off a new physical region from self.
+    ///
+    /// # Returns
+    /// The region that is split off
     fn split(&mut self, frames: u32) -> Option<PhysicalRegion> {
-        if self.is_free() && self.frames - frames > 1 {
+        if self.frames - frames > 1 {
             self.frames -= frames;
             Some( PhysicalRegion {
                 start: self.exclusive_end(),
@@ -103,6 +122,36 @@ impl PhysicalRegion {
         }
     }
 }
+
+impl Ord for PhysicalRegion {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        if self.overlaps(other) || self.contains(other) || self.within(other) {
+            core::cmp::Ordering::Equal
+        } else {
+            self.start.cmp(&other.start)
+        }
+    }
+}
+
+impl PartialOrd for PhysicalRegion {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        if self.start() > other.end() {
+            Some(core::cmp::Ordering::Greater)
+        } else if self.end() < other.start() {
+            Some(core::cmp::Ordering::Less)
+        } else {
+            None
+        }
+    }
+}
+
+impl PartialEq for PhysicalRegion {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start && self.end() == other.end()
+    }
+}
+
+impl Eq for PhysicalRegion {}
 
 #[derive(Debug)]
 struct FrameAllocator {
@@ -137,6 +186,14 @@ impl FrameAllocator {
     fn frame_count(&self) -> usize {
         self.frames.len()
     }
+
+    fn contains_frame(&self, frame: PhysAddr) -> bool {
+        self.frames.contains(&frame)
+    }
+
+    fn get_frames(&mut self, range: PhysicalRegion ) -> Vec<PhysAddr> {
+        self.frames.drain_filter(|p| range.contains_val(p.as_u64() as usize)).collect()
+    }
 }
 
 #[derive(Debug)]
@@ -147,9 +204,9 @@ pub struct PhysicalMemoryManager {
     heap_start_phys: PhysAddr,
     heap_end_phys: PhysAddr,
     free_regions: BTreeSet<PhysicalRegion>,
-    unusable: Vec<PhysicalRegion>,
+    free_low_memory: BTreeSet<PhysicalRegion>,
+    unusable: BTreeSet<PhysicalRegion>,
     frames: FrameAllocator,
-
 }
 
 impl PhysicalMemoryManager {
@@ -163,6 +220,10 @@ impl PhysicalMemoryManager {
             // TODO: Verify if I can reuse EfiLoaderCode and EfiLoaderData (1, 2)
             let usage = match entry.ty {
                 3 | 4 | 7 => Usage::Free,
+                9 => {
+                    crate::println!("Acpi address: {:#X}", entry.phys_start);
+                    Usage::AcpiReclaim
+                },
                 8 => Usage::Unusable,
                 0 | 5 | 6 => Usage::Reserved,
                 _ => Usage::Unusable
@@ -173,19 +234,31 @@ impl PhysicalMemoryManager {
                 usage
             };
 
+            // FIXME: 0 frames indicates an invalid region however if the memory is not zeroed how
+            // will we detect if it is an invalid region or not.
+            // This could be a bug with the bootloader passing the memory map to the kernel
+            if region.frames == 0 {
+                crate::println!("region {:?} with 0 frames skipping...", region.start);
+                continue;
+            }
+
             match usage {
-                Usage::Free => { 
-                    if region.contains(self.heap_start_phys) {
+                Usage::Free | Usage::AcpiReclaim => { 
+                    if region.contains_val(self.heap_start_phys.as_u64() as usize) {
                         let (heap_region, (r1, r2)) = region.sub_region(self.heap_start_phys, self.heap_end_phys);
                         crate::println!("Heap region found {:#X?}", heap_region);
                         crate::println!("Remaining regions {:#X?} \n{:#X?}", r1, r2);
                         r1.map(|r| self.free_regions.insert(r));
                         r2.map(|r| self.free_regions.insert(r));
                     } else {
-                        self.free_regions.insert(region);
+                        if region.start() >= 0x10000 {
+                            self.free_regions.insert(region);
+                        } else {
+                            self.free_low_memory.insert(region);
+                        }
                     }
                 },
-                _ => self.unusable.push(region),
+                _ => { self.unusable.insert(region); },
             }
         }
 
@@ -204,14 +277,21 @@ impl PhysicalMemoryManager {
             heap_start_phys: PhysAddr::zero(),
             heap_end_phys: PhysAddr::zero(),
             free_regions: BTreeSet::new(),
-            unusable: Vec::new(),
+            free_low_memory: BTreeSet::new(),
+            unusable: BTreeSet::new(),
             frames: FrameAllocator::new(),
         }
     }
 
     fn fill_frame_allocator(&mut self) {
         let entry = self.free_regions.pop_first().expect("Out of physical memory");
-        self.frames.fill(entry);
+        if entry.usage != Usage::AcpiReclaim {
+            self.frames.fill(entry);
+        } else {
+            let new_entry = self.free_regions.pop_first().expect("Out of physical memory");
+            self.frames.fill(new_entry);
+            self.free_regions.insert(entry);
+        }
     }
 
     fn unavailable_regions(&self) -> impl Iterator<Item = &PhysicalRegion> + '_ {
@@ -253,6 +333,7 @@ impl PhysicalMemoryManager {
         (vaddr.as_mut_ptr() as *mut T).as_mut()
     }
 
+    /// Gets the first available physical frame not in use.
     pub fn request_frame(&mut self) -> PhysAddr {
         let frame = self.frames.allocate().unwrap_or_else(|| {
             self.fill_frame_allocator();
@@ -267,6 +348,42 @@ impl PhysicalMemoryManager {
 
     pub fn release_frame(&mut self, paddr: PhysAddr) {
         self.frames.free(paddr)
+    }
+
+    /// Finds the frame either in a contiguos region or in the frame allocator. 
+    /// Uses linear search since the frame allocator is an unordered stack and the region set is
+    /// ordered based on range.
+    // TODO: we could potentially binary search the regions and return the closest range then check
+    // if said range contains the address
+    pub fn find_frame(&self, frame: PhysAddr) -> bool {
+        let regions_search = self.free_regions.iter().find(|f| f.contains_val(frame.as_u64() as usize));
+
+        regions_search.is_some() || self.frames.contains_frame(frame)
+    }
+
+    /// Allocates a frame within low memory (< 1 mb)
+    pub fn request_low_memory(&mut self, addr: PhysAddr, size: usize) -> Option<PhysAddr> {
+        let candidate_region = PhysicalRegion { start: addr, frames: size as u32, usage: Usage::Free };
+        self.free_low_memory.take(&candidate_region).map(|r| r.start)
+    }
+
+    /// Request a specific physical memory region.
+    pub fn request_range(&mut self, paddr: PhysAddr, size: usize) -> Option<PhysAddr> {
+        let candidate_region = PhysicalRegion { start: paddr, frames: size as u32, usage: Usage::Free };
+        let from_regions = self.free_regions.take(&candidate_region);
+
+        if let Some(region) = from_regions {
+            let (result, (x, xs)) = region.sub_region(paddr, paddr + size as u64 * PAGE_SIZE as u64);
+            x.map(|f| self.free_regions.insert(f));
+            xs.map(|f| self.free_regions.insert(f));
+            Some(result.start)
+        } else {
+            let mut frames = self.frames.get_frames(candidate_region);
+            frames.sort();
+            let result = frames.pop()?;
+
+            (result == paddr).then_some(result)
+        }
     }
 }
 
@@ -321,7 +438,7 @@ pub fn get_init_heap_section(
         match descriptor.ty {
             7 => {
                 write_serial_out("Mem type match \n");
-                if descriptor.page_count >= size as u64 {
+                if descriptor.page_count >= size as u64 && descriptor.phys_start > 0x10000 {
                     sect = Some(descriptor.phys_start);
                     break;
                 }
@@ -340,9 +457,31 @@ pub fn get_init_heap_section(
     }
     let start_address = PhysAddr::new(sect.ok_or("<ERROR>No suitable memory start_addr found\n")?);
     let start_frame = PhysFrame::containing_address(start_address);
-    //.map_err(|_| "Start Address unaligned")?;
     let end_frame = PhysFrame::containing_address(start_address + (size as u64 * PAGE_SIZE as u64));
-    //.map_err(|_| "End Address unaligned")?;
 
     Ok(PhysFrame::range(start_frame, end_frame))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use super::super::*;
+
+    #[test_case]
+    fn test_request_range() {
+        // NOTE: This only tests finding the frame from the stack allocator and not in the regions
+        let test_addr = memory_manager().request_frame();
+        unsafe {
+            memory_manager().release_frame(test_addr.clone());
+        }
+        let pre = memory_manager().pmm.find_frame(test_addr);
+        let f = memory_manager().pmm.request_range(test_addr, 1);
+        let post = memory_manager().pmm.find_frame(test_addr);
+
+        assert!(pre);
+        assert!(f.is_some());
+        assert!(!post);
+
+        memory_manager().pmm.release_frame(f.unwrap());
+    }
 }

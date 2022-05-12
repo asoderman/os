@@ -8,6 +8,16 @@ use x86_64::{
 
 use crate::mm::{MemoryManager, phys_to_virt};
 
+const MAX_PAGE_ENTRIES: usize = 511;
+
+pub struct Flusher(VirtAddr);
+
+impl Drop for Flusher {
+    fn drop(&mut self) {
+        x86_64::instructions::tlb::flush(self.0);
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum MapError {
     /// Returned if at the end of the PT structure
@@ -132,14 +142,43 @@ impl<'a> Mapper<'a> {
         if !entry.is_unused() { return Err(MapError::PresentEntry); }
 
         let frame = mm.request_frame();
-        entry.set_addr(frame, PageTableFlags::PRESENT);
+        entry.set_addr(frame, PageTableFlags::WRITABLE | PageTableFlags::PRESENT);
         Ok(())
+    }
+
+    pub fn map_frame(&mut self, frame: PhysAddr, mm: &mut MemoryManager) -> Result<Flusher, MapError> {
+
+        loop {
+            // Ensure everything is writable by default
+            self.next_entry().flags().set(PageTableFlags::WRITABLE, true);
+
+            match self.advance() {
+                Err(MapError::NotPresent) => {
+                    if self.current_level != 1 {
+                        self.map_next(mm)?
+                    }
+                },
+                Err(MapError::BottomLevel) =>  { 
+                    let index = self.next_index();
+                    self.current()[index].set_addr(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
+                    return Ok(Flusher(self.addr))
+                },
+                Err(e) => { Err(e)? },
+                _ => {
+                    self.next_entry().flags().set(PageTableFlags::WRITABLE, true);
+                    if !self.next_entry().flags().contains(PageTableFlags::WRITABLE) {
+                        self.next_entry().set_flags(PageTableFlags::WRITABLE | PageTableFlags::PRESENT);
+                        assert!(self.next_entry().flags().contains(PageTableFlags::WRITABLE));
+                    }
+                },
+            }
+        }
     }
 
     /// Unmaps the entry the walker would advance to next.
     ///
     /// Returns the unmapped_frame or Error if the entry is marked not present.
-    pub fn unmap_page(&mut self) -> Result<PhysAddr, MapError> {
+    pub fn unmap_next(&mut self) -> Result<PhysAddr, MapError> {
         if self.next_entry().is_unused() { Err(MapError::NotPresent)? };
         let frame = self.next_entry().addr();
         self.next_entry().set_unused();
@@ -153,12 +192,26 @@ impl<'a> Mapper<'a> {
         // crash
         if self.current_level != 1 { return; }
         let l1_index = usize::from(self.indices.last().unwrap().clone());
+        let range_end = l1_index + pages;
+        // the range to be mapped excluding the already mapped page
+        let map_range = (l1_index..(range_end)).skip(1);
 
-        for i in (l1_index..(l1_index + pages)).skip(1) {
+        // If we need multiple l2_pages
+        if range_end > MAX_PAGE_ENTRIES {
+            let next_l2_end = range_end % 512;
+        }
+
+        for i in map_range {
             let frame = mm.request_frame();
+            // if we cross a page table boundary
+            if i % 512 == 0 && i != 0 {
+                self.ascend().unwrap();
+                self.increase_index(2).unwrap();
+                self.map_next(mm);
+                self.advance();
+            }
             // TODO: remove hardcoded flags
-            self.current()[i].set_addr(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
-
+            self.current()[i % 512].set_addr(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
         }
     }
 }
