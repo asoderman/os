@@ -2,7 +2,8 @@ use core::cell::Cell;
 use core::sync::atomic::AtomicUsize;
 use core::fmt::Debug;
 
-use crate::{acpi, arch::x86_64::cpu::lapic::Lapic};
+use crate::arch::x86_64::smp::lapic::Lapic;
+use crate::acpi;
 use crate::arch::PhysAddr;
 
 use ::acpi::{InterruptModel, platform::ProcessorInfo};
@@ -110,7 +111,7 @@ pub fn init_smp(bootinfo: &KernelInfo) -> Result<(), CpuError> {
         InterruptModel::Apic(apic) => {
             // TODO: put this in a function
             unsafe {
-                crate::arch::x86_64::cpu::lapic::LAPIC_BASE.store(apic.local_apic_address as usize, core::sync::atomic::Ordering::SeqCst);
+                crate::arch::x86_64::smp::lapic::LAPIC_BASE.store(apic.local_apic_address as usize, core::sync::atomic::Ordering::SeqCst);
             }
             apic_list_cores(info.processor_info.as_ref().unwrap());
             bsp!().lapic().set(Lapic::new(PhysAddr::new(apic.local_apic_address)));

@@ -8,6 +8,7 @@ mod gdt;
 pub mod paging;
 mod pic;
 mod pit;
+pub mod smp;
 
 pub fn platform_init() {
     gdt::init_gdt();
@@ -18,5 +19,5 @@ pub fn platform_init() {
 
 /// Returns the apic id of the core the calls this
 pub fn apic_id() -> u32 {
-    cpu::lapic::read_apic_id_mmio()
+    smp::lapic::read_apic_id_mmio()
 }
