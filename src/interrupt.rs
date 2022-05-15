@@ -52,12 +52,8 @@ pub fn without_interrupts<F: FnOnce()>(f: F) {
 }
 
 pub fn init() -> Result<(), ()> {
-    crate::stack::print_stack_usage();
-    println!("enter interrupt::init()");
     #[cfg(target_arch="x86_64")]
     {
-        crate::arch::x86_64::idt::init_idt()?;
-        println!("Empty IDT initialized");
         let idt = crate::arch::x86_64::idt::get_idt_mut().ok_or(())?;
 
         x86_64::set_general_handler!(idt, no_op_isr);

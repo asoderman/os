@@ -43,20 +43,20 @@ macro_rules! impl_and_register_x86_interrupt {
     }
 }
 
-/// Initialize an empty IDT
+/// Initialize and load an (empty) IDT
 pub fn init_idt() -> Result<(), ()> {
     crate::println!("enter init_idt");
-    let idt = Box::new(InterruptDescriptorTable::new());
-
-    crate::stack::print_stack_usage();
-    unsafe {
-        IDT = Some(IDTInfo { ptr: idt, size: core::mem::size_of::<InterruptDescriptorTable>() });
-        IDT.as_mut().ok_or(())?.get_idt_mut().reset();
-
-        assert!(!x86_64::instructions::interrupts::are_enabled());
-        get_idt().unwrap().load();
+    if get_idt().is_none() {
+        let idt = Box::new(InterruptDescriptorTable::new());
+        // Set the global IDT
+        unsafe {
+            IDT = Some(IDTInfo { ptr: idt, size: core::mem::size_of::<InterruptDescriptorTable>() });
+            IDT.as_mut().ok_or(())?.get_idt_mut().reset();
+        }
     }
 
+    assert!(!x86_64::instructions::interrupts::are_enabled());
+    get_idt().unwrap().load();
     Ok(())
 }
 

@@ -57,10 +57,6 @@ impl Trampoline {
 
         let ap_rsp = crate::stack::allocate_kernel_stack();
         crate::println!("new Kernel stack created");
-        unsafe {
-            crate::println!("maint: thread_local: {:p}", &THREAD_LOCAL_TEST);
-            crate::println!("maint: thread_local: {:X}", THREAD_LOCAL_TEST);
-        }
 
         let args = TrampolineArgs {
             page_table: page_table.as_u64() as usize,
@@ -127,38 +123,19 @@ unsafe fn cleanup_trampoline(_lapic_id: u32) {
     ACTIVE_TRAMPOLINES = None;
 }
 
-#[thread_local]
-static mut THREAD_LOCAL_TEST: usize = 0xdeadbeef;
-
-#[thread_local]
-static mut THREAD_LOCAL_TEST2: u8 = 0xAA;
-
-#[no_mangle]
-pub fn modify_thread_local(value: usize) {
-    unsafe {
-        THREAD_LOCAL_TEST = value;
-    }
-}
-
 /// The rust entry point for ap's
 pub extern "C" fn ap_entry(lapic_id: usize) {
     crate::println!("ap_entry lapic_id: {}", lapic_id);
     SMP_CORES_READY[crate::core!(lapic_id).local_apic_id as usize].store(true, Ordering::SeqCst);
-
+    crate::arch::x86_64::ap_init(lapic_id);
     unsafe {
-        super::super::gdt::load_kernel_gdt();
-        super::thread_local::init_thread_local(lapic_id);
-        crate::println!("ap_entry: thread_local2: {:p}", &THREAD_LOCAL_TEST2);
-        crate::println!("ap_entry: thread_local2: {:X}", THREAD_LOCAL_TEST2);
-        crate::println!("ap_entry: thread_local: {:p}", &THREAD_LOCAL_TEST);
-        crate::println!("ap_entry: thread_local: {:X}", THREAD_LOCAL_TEST);
         cleanup_trampoline(lapic_id as u32);
     }
+
     for (i, core) in SMP_CORES_READY.iter().enumerate() {
         crate::println!("core {} ready:{:?}", i, core);
     }
     todo!("Finish initializing the ap");
-    todo!("load idt");
     todo!("init lapic");
     loop {}
 }

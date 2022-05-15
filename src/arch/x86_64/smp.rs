@@ -1,21 +1,17 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use alloc::vec::Vec;
 use libkloader::KernelInfo;
 use ::acpi::{InterruptModel, platform::ProcessorInfo};
-use spin::{RwLock, RwLockReadGuard};
 use crate::acpi;
-use lazy_static::lazy_static;
 
 use self::lapic::Lapic;
 
+mod cpulist;
 pub mod lapic;
 mod trampoline;
-mod thread_local;
+pub(super) mod thread_local;
 
-lazy_static! {
-    static ref CPU_LIST: RwLock<Vec<Core>> = RwLock::new(Vec::new());
-}
+pub use cpulist::cpu_list;
 
 static CORES: AtomicUsize = AtomicUsize::new(0);
 
@@ -56,6 +52,7 @@ impl Core {
     }
 }
 
+#[derive(Debug)]
 pub enum SmpError {
     UnknownInterruptModel,
 }
@@ -94,18 +91,17 @@ fn apic_list_cores(info: &ProcessorInfo) {
     bsp.processor_uid = info.boot_processor.processor_uid;
     bsp.local_apic_id = info.boot_processor.local_apic_id;
 
-    CPU_LIST.write().push(bsp);
+    cpulist::add_core(bsp);
 
     for p in info.application_processors.iter().enumerate() {
         let mut ap = Core::new(p.1.local_apic_id);
         ap.is_ap = true;
         ap.processor_uid = p.1.processor_uid;
         ap.local_apic_id = p.1.local_apic_id;
-        CPU_LIST.write().push(ap);
+        cpulist::add_core(ap);
     }
 
-    CPU_LIST.write().sort_by_key(|c| c.local_apic_id);
-    CORES.store(CPU_LIST.read().len(), Ordering::SeqCst);
+    CORES.store(cpulist::finalize(), Ordering::SeqCst);
 }
 
 /// Gets the lapic for the current core
@@ -113,10 +109,9 @@ fn lapic() -> Lapic {
     Lapic::new()
 }
 
-pub fn cpu_list<'c>() -> RwLockReadGuard<'c, Vec<Core>> {
-    CPU_LIST.read()
-}
+/// Gets the global cpu list which contains read only info about the other CPUs
 
-fn smp_cores() -> usize {
-    CPU_LIST.read().len()
+/// Gets the smp core count
+pub fn smp_cores() -> usize {
+    CORES.load(Ordering::SeqCst)
 }
