@@ -1,8 +1,8 @@
-use core::sync::atomic::{AtomicBool, AtomicUsize};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use x86_64::{PhysAddr, registers::model_specific::Msr};
+use x86_64::{PhysAddr, registers::model_specific::Msr, VirtAddr};
 
-use crate::mm::memory_manager;
+use crate::mm::{memory_manager, temp_page};
 
 use super::super::pic::PICS;
 
@@ -116,24 +116,32 @@ pub struct Lapic {
     x2: bool
 }
 
-impl Default for Lapic {
-    fn default() -> Self {
-        Self {
-            base: PhysAddr::new(0),
-            x2: false
+impl Drop for Lapic {
+    fn drop(&mut self) {
+        unsafe {
+            memory_manager().kunmap_untracked(VirtAddr::new(self.base.as_u64()));
+            LAPIC_LOCK.store(false, Ordering::SeqCst);
         }
     }
 }
+
+static mut LAPIC_LOCK: AtomicBool = AtomicBool::new(false);
+
 impl Lapic {
+    // TODO: If multiple cores try to access the lapic it will cause UB
     /// Create an interface to the local apic and map the registers into memory.
-    pub fn new(base: PhysAddr) -> Self {
+    pub fn new() -> Self {
         unsafe {
+            let base_phys = PhysAddr::new(LAPIC_BASE.load(Ordering::SeqCst) as u64);
+            if base_phys.as_u64() == u64::max_value() { panic!("LAPIC_BASE not set") }
+            // TODO: Map each in seperate virtual adresses so we don't need to lock
+            while LAPIC_LOCK.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {}
             // TODO: Map this in the higher half
-            memory_manager().map_unchecked(base, 1).expect("Could not map lapic");
-        }
-        Self {
-            base,
-            x2: false,
+            memory_manager().map_unchecked(base_phys, 1).expect("Could not map lapic");
+            Self {
+                base: base_phys,
+                x2: false,
+            }
         }
     }
 
@@ -289,6 +297,7 @@ fn disable_pic() {
     PIC_DISABLED.store(true, core::sync::atomic::Ordering::SeqCst);
 }
 
+/// Enables the x2apic which uses MSRs
 fn enable_x2apic_msr() {
     let mut msr = x86_64::registers::model_specific::Msr::new(0x1B);
     unsafe {

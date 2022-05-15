@@ -25,4 +25,20 @@ SECTIONS {
         KEEP(*(COMMON))
         KEEP(*(.bss*))
     }
+
+    .tdata ALIGN(4K) :
+    {
+        __tdata_start = .;
+        KEEP(*(COMMON))
+        KEEP(*(.tdata*))
+        __tdata_end = .;
+    }
+
+    .tbss ALIGN(4K) :
+    {
+        __tbss_start = .;
+        KEEP(*(COMMON))
+        KEEP(*(.tbss*))
+        __tbss_end = .;
+    }
 }

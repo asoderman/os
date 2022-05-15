@@ -8,6 +8,7 @@
 #![feature(map_first_last)]
 #![feature(drain_filter)]
 #![feature(bool_to_option)]
+#![feature(thread_local)]
 #![test_runner(test_runner)]
 
 #![reexport_test_harness_main = "test_main"]
@@ -49,7 +50,7 @@ fn static_assert(b: bool, msg: &str) {
 
 #[no_mangle]
 extern "C" fn start(bootinfo: *const KernelInfo) {
-    let info = unsafe { core::ptr::read_unaligned(bootinfo) };
+    let info = unsafe { bootinfo.as_ref().expect("Nullptr dereferenced for bootinfo") };
     main(&info);
 }
 
@@ -64,7 +65,6 @@ fn main(bootinfo: &KernelInfo) {
             panic!();
         });
 
-    arch::x86_64::platform_init();
 
     println!("=== {} {} ===\n", info::KERNEL_NAME, info::KERNEL_VERSION);
     println!("start RSP: {:#X}", bootinfo.rsp);
@@ -73,19 +73,13 @@ fn main(bootinfo: &KernelInfo) {
     println!("Heap size: {}", heap_init_result.1 - heap_init_result.0);
 
     mm::init(heap_init_result, bootinfo);
+
+    arch::x86_64::platform_init(bootinfo);
     println!("Initializing interrupts");
     println!("est stack usage: {:#X}", bootinfo.rsp - stack::get_rsp());
     interrupt::init().unwrap_or_else(|_| {
         println!("Unable to initialize interrupts");
     });
-
-    cpu::init_smp(bootinfo).unwrap_or_else(|_| {
-        println!("Unable to initialize cpus");
-    });
-    println!("Processors: {}", cpu::cores());
-    println!("all: {:#?}", cpu::cpu_list());
-    println!("BSP: {:#?}", core!());
-
 
     #[cfg(test)]
     test_main();
