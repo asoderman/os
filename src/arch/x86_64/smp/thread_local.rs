@@ -1,4 +1,3 @@
-
 use core::ptr::addr_of;
 use core::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 

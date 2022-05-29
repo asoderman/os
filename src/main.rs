@@ -35,7 +35,7 @@ mod util;
 
 use core::panic::PanicInfo;
 
-use libkloader::{KernelInfo};
+use libkloader::KernelInfo;
 use x86_64::VirtAddr;
 
 use dev::serial::write_serial_out;
@@ -50,13 +50,16 @@ fn static_assert(b: bool, msg: &str) {
 
 #[no_mangle]
 extern "C" fn start(bootinfo: *const KernelInfo) {
-    let info = unsafe { bootinfo.as_ref().expect("Nullptr dereferenced for bootinfo") };
+    let info;
+    unsafe {
+        stack::set_stack_start((*bootinfo).rsp);
+        info = bootinfo.as_ref().expect("Nullptr dereferenced for bootinfo");
+    }
     main(&info);
 }
 
 fn main(bootinfo: &KernelInfo) {
     static_assert(!bootinfo.mem_map_info.start.is_null(), "Mem map null ptr");
-    stack::set_stack_start(bootinfo.rsp);
 
     let heap_init_result =
         init_heap(bootinfo.mem_map_info, VirtAddr::new(bootinfo.phys_offset))
@@ -65,6 +68,7 @@ fn main(bootinfo: &KernelInfo) {
             panic!();
         });
 
+    mm::memory::init_memory_regions(bootinfo);
 
     println!("=== {} {} ===\n", info::KERNEL_NAME, info::KERNEL_VERSION);
     println!("start RSP: {:#X}", bootinfo.rsp);

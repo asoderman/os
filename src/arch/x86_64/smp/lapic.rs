@@ -112,34 +112,26 @@ pub enum Ipi {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Lapic {
     /// The IA32_APIC_BASE
-    base: PhysAddr,
+    vaddr: VirtAddr,
     x2: bool
 }
 
 impl Drop for Lapic {
     fn drop(&mut self) {
-        unsafe {
-            memory_manager().kunmap_untracked(VirtAddr::new(self.base.as_u64()));
-            LAPIC_LOCK.store(false, Ordering::SeqCst);
-        }
+        memory_manager().unmap_region(self.vaddr, 1).unwrap();
     }
 }
 
-static mut LAPIC_LOCK: AtomicBool = AtomicBool::new(false);
-
 impl Lapic {
-    // TODO: If multiple cores try to access the lapic it will cause UB
     /// Create an interface to the local apic and map the registers into memory.
     pub fn new() -> Self {
         unsafe {
             let base_phys = PhysAddr::new(LAPIC_BASE.load(Ordering::SeqCst) as u64);
             if base_phys.as_u64() == u64::max_value() { panic!("LAPIC_BASE not set") }
-            // TODO: Map each in seperate virtual adresses so we don't need to lock
-            while LAPIC_LOCK.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {}
-            // TODO: Map this in the higher half
-            memory_manager().map_unchecked(base_phys, 1).expect("Could not map lapic");
+            let vaddr = memory_manager().kmap_mmio_anywhere(base_phys, 1).expect("Could not map lapic");
+            crate::println!("Mapping lapic to {:?}", vaddr);
             Self {
-                base: base_phys,
+                vaddr,
                 x2: false,
             }
         }
@@ -175,7 +167,7 @@ impl Lapic {
     /// Read the lapic id register
     pub fn id(&self) -> u32 {
         unsafe {
-            core::ptr::read((self.base.as_u64() as usize + ID_REGISTER) as *const u32)
+            core::ptr::read((self.vaddr.as_u64() as usize + ID_REGISTER) as *const u32)
         }
     }
 
@@ -193,6 +185,7 @@ impl Lapic {
         self.send_interrupt(Ipi::Sipi(trampoline_vec as u8), lapic_id).unwrap();
 
         crate::println!("Wake core sent");
+
         loop {} // TODO: REMOVE THIS
 
         Ok(())
@@ -235,7 +228,7 @@ impl Lapic {
     }
 
     fn write_siv(&self, val: u32) {
-        let addr = self.base.as_u64() as usize + SPURIOUS_INTERRUPT_VECTOR_REGISTER;
+        let addr = self.vaddr.as_u64() as usize + SPURIOUS_INTERRUPT_VECTOR_REGISTER;
         unsafe {
             core::ptr::write(addr as *mut u32, val);
         }
@@ -248,9 +241,10 @@ impl Lapic {
         }
     }
 
+    #[allow(dead_code)]
     fn read_siv(&self) -> u32 {
         unsafe {
-            core::ptr::read_volatile((self.base.as_u64() as usize + SPURIOUS_INTERRUPT_VECTOR_REGISTER) as *const u32)
+            core::ptr::read_volatile((self.vaddr.as_u64() as usize + SPURIOUS_INTERRUPT_VECTOR_REGISTER) as *const u32)
         }
     }
 
@@ -262,28 +256,28 @@ impl Lapic {
     }
 
     fn write_icr_low(&self, val: u32) {
-        let addr = self.base.as_u64() as usize + ICR_LOW;
+        let addr = self.vaddr.as_u64() as usize + ICR_LOW;
         unsafe {
             core::ptr::write_volatile(addr as *mut u32, val);
         }
     }
 
     fn write_icr_high(&self, val: u32) {
-        let addr = self.base.as_u64() as usize + ICR_HIGH;
+        let addr = self.vaddr.as_u64() as usize + ICR_HIGH;
         unsafe {
             core::ptr::write_volatile(addr as *mut u32, val);
         }
     }
 
     fn read_icr_low(&self) -> Icr {
-        let addr = self.base.as_u64() as usize + ICR_LOW;
+        let addr = self.vaddr.as_u64() as usize + ICR_LOW;
         unsafe {
             Icr(core::ptr::read_volatile(addr as *const u32))
         }
     }
 
     fn eoi(&self) {
-        let addr = self.base.as_u64() as usize + EOI_REGISTER;
+        let addr = self.vaddr.as_u64() as usize + EOI_REGISTER;
         unsafe {
             core::ptr::write_volatile(addr as *mut u8, 0);
         }
@@ -303,11 +297,5 @@ fn enable_x2apic_msr() {
     unsafe {
         let old = msr.read();
         msr.write(old | (0b1 << 10));
-    }
-}
-
-pub fn read_apic_id_mmio() -> u32 {
-    unsafe {
-        core::ptr::read_volatile((LAPIC_BASE.load(core::sync::atomic::Ordering::SeqCst) + ID_REGISTER) as *const u32)
     }
 }

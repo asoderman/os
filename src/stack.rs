@@ -7,7 +7,7 @@ use core::arch::asm;
 /// The starting kernel stack. On x64 this is the initial value of rsp
 static mut STARTING_KERNEL_STACK_ADDR: u64 = 0;
 
-const KERNEL_STACK_SIZE_BYTES: usize = 2 * PAGE_SIZE;
+const KERNEL_STACK_SIZE_BYTES: usize = 4 * PAGE_SIZE;
 
 pub fn set_stack_start(rsp: u64) {
     unsafe { STARTING_KERNEL_STACK_ADDR = rsp; }

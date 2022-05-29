@@ -10,6 +10,8 @@ use lazy_static::lazy_static;
 
 static mut ACTIVE_TRAMPOLINES: Option<BTreeMap<u32, Mutex<Trampoline>>> = None;
 
+const TRAMPOLINE_LOAD_ADDRESS: u64 = 0x8000;
+
 lazy_static! {
     static ref SMP_CORES_READY: Vec<AtomicBool> = {
         let mut v = Vec::new();
@@ -67,7 +69,8 @@ impl Trampoline {
 
         unsafe {
             Self::write_trampoline(phys_frame);
-            Self::write_trampoline_args(phys_frame, args);
+            // Write the args 8 bytes after the start of the trampoline
+            Self::write_trampoline_args(phys_frame + 8u64, args);
         }
 
         Self {
@@ -85,22 +88,22 @@ impl Trampoline {
     /// Allocate a physical frame < (255 * Page Size). This is necessary because the ap starts on
     /// the page specified by a 1 byte start vector.
     fn allocate_low_frame() -> PhysAddr {
-        let addr = PhysAddr::new(0x8000);
+        let addr = PhysAddr::new(TRAMPOLINE_LOAD_ADDRESS);
         memory_manager().k_identity_map(addr, 1).unwrap();
         addr
     }
     /// Write the trapoline code from trampoline.S to the vector
     unsafe fn write_trampoline(addr: PhysAddr) {
-        let ptr = core::slice::from_raw_parts_mut(addr.as_u64() as usize as *mut u8, PAGE_SIZE);
+        //let ptr = core::slice::from_raw_parts_mut(addr.as_u64() as usize as *mut u8, PAGE_SIZE);
 
-        ptr[0..TRAMPOLINE_CODE.len()].clone_from_slice(TRAMPOLINE_CODE);
+        crate::mm::write_physical_slice(addr, TRAMPOLINE_CODE);
     }
 
     /// Writes extra data needed to get ap to long mode
     unsafe fn write_trampoline_args(trampoline_frame: PhysAddr, args: TrampolineArgs) {
-        const ARGS_OFFSET: usize = 1;
-        let ptr = (trampoline_frame.as_u64() as usize as *mut usize).add(ARGS_OFFSET) as *mut TrampolineArgs;
-            ptr.write(args)
+        // const ARGS_OFFSET: usize = 1;
+        //let ptr = (trampoline_frame.as_u64() as usize as *mut usize).add(ARGS_OFFSET) as *mut TrampolineArgs;
+        crate::mm::write_physical(trampoline_frame, args);
     }
 
     /// Insert the Trampoline into the global list to be retrieved by its core later on for cleanup

@@ -20,17 +20,14 @@ impl AcpiHandler for AcpiMapper {
         let end = PhysAddr::new(align_up((physical_address + size) as u64, PAGE_SIZE as u64));
         let frame_count = (end - start) / PAGE_SIZE as u64;
 
-        memory_manager().map_unchecked(start, frame_count as usize).expect("Error identity mapping with ACPI");
+        memory_manager().kmap_identity_mmio(start, frame_count as usize).expect("Error identity mapping with ACPI");
 
         let v_start = VirtAddr::new(physical_address as u64);
         PhysicalMapping::new(physical_address, NonNull::new_unchecked(v_start.as_mut_ptr() as *mut T), size, frame_count as usize, self.clone())
     }
 
     fn unmap_physical_region<T>(region: &PhysicalMapping<Self, T>) {
-        for frame in 0..region.mapped_length() {
-            let addr = region.physical_start() + frame * PAGE_SIZE;
-            memory_manager().kunmap_untracked(VirtAddr::new(addr as u64));
-        }
+        memory_manager().unmap_region(VirtAddr::new(region.virtual_start().as_ptr() as u64), region.mapped_length()).unwrap();
     }
 }
 

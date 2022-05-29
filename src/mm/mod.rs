@@ -1,23 +1,26 @@
 mod error;
-mod vmm;
+pub mod frame_allocator;
+mod mapping;
+pub mod memory;
 mod pmm;
 mod region;
+mod vmm;
 
-use crate::arch::PAGE_SIZE;
-use crate::arch::x86_64::paging::Mapper;
-use crate::arch::{PhysAddr, VirtAddr, x86_64::paging::MapError};
+use crate::arch::{PhysAddr, VirtAddr};
 use libkloader::KernelInfo;
 use spin::{Mutex, MutexGuard};
 use vmm::init_vmm;
-use x86_64::structures::paging::PageTableFlags;
 
 pub use pmm::phys_to_virt;
 pub use pmm::get_init_heap_section;
 pub use error::MemoryManagerError;
 
+use self::frame_allocator::FrameAllocator;
+use self::mapping::Mapping;
 use self::pmm::PhysicalMemoryManager;
-use self::vmm::{VirtualMemoryManager, VirtualMemoryError};
+use self::vmm::{VirtualMemoryManager, VirtualMemoryError, VirtualRegion};
 pub use self::vmm::get_kernel_context_virt;
+pub use self::pmm::{write_physical, write_physical_slice};
 
 use lazy_static::lazy_static;
 
@@ -42,24 +45,6 @@ impl MemoryManager {
         }
     }
 
-    /// Request a physical frame from the pmm
-    pub fn request_frame(&mut self) -> PhysAddr {
-        self.pmm.request_frame()
-    }
-
-    pub fn request_frame_at(&mut self, paddr: PhysAddr, size: usize) -> Option<PhysAddr> {
-        self.pmm.request_range(paddr, size)
-    }
-
-    /// Returns a physical frame to the pmm
-    ///
-    /// # Unsafety
-    /// This method is unsafe because there are no checks if the memory is still in use or if the
-    /// memory is already free.
-    pub unsafe fn release_frame(&mut self, paddr: PhysAddr) {
-        self.pmm.release_frame(paddr)
-    }
-
     /// Mutably borrow the memory at the provided PhysAddr
     pub unsafe fn get_phys_as_mut<T>(&self, paddr: PhysAddr) -> Option<&mut T> {
         self.pmm.get_phys_as_mut(paddr)
@@ -67,114 +52,55 @@ impl MemoryManager {
 
     /// Identity maps a physical page into the virtual address space if it is available
     pub fn k_identity_map(&mut self, paddr: PhysAddr, size: usize) -> Result<(), Error> {
-        let _frames = self.pmm.request_range(paddr, size).ok_or(VirtualMemoryError::RegionInUse("PMM: could not reserve requested range"));
-        if let Err(e) = _frames {
-            self.pmm.request_low_memory(paddr, size).ok_or(e)?;
-        }
+        let frame = self.pmm.request_low_memory(paddr, size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
+        assert_eq!(frame, paddr);
+        let mapping = mapping::Mapping::new_identity(frame);
+        crate::println!("id mapping: {:#X?}", mapping);
+        self.vmm.insert_and_map(mapping, &mut self.pmm)?;
+        Ok(())
 
-        unsafe {
-            self.map_unchecked(paddr, size)
-        }
-
-    }
-
-    /// Map the specified frame to the specified page.
-    pub fn map_frame_to_page(&mut self, frame: PhysAddr, page: VirtAddr) -> Result<VirtAddr, Error> {
-        self.vmm.reserve_region(page, 1)?;
-        let kernel_pt = unsafe {
-            get_kernel_context_virt().unwrap().as_mut()
-        };
-        // TODO: real error handling
-        Mapper::new(page, kernel_pt).map_frame(frame, self).expect("Map error");
-        Ok(page)
     }
 
     /// Map a writable page into the kernel context
     pub fn kmap(&mut self, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
-        let kernel_context = unsafe {
-            get_kernel_context_virt().expect("kmap unable to get kernel context").as_mut()
-        };
-        self.vmm.reserve_region(vaddr, pages)?;
-
-        let mut walker = Mapper::new(vaddr, kernel_context);
-
-        loop {
-            match walker.advance() {
-                Err(MapError::BottomLevel) => { break; },
-                Err(MapError::NotPresent) => { 
-                    walker.map_next(self).unwrap();
-                    walker.next_entry().set_flags(PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
-                },
-                Err(MapError::HugeFrame) => { Err(VirtualMemoryError::RegionInUse("Attempted to kmap huge frame"))? },
-                _ => {
-                    walker.next_entry().set_flags(PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
-                }
-            }
-        }
-
-        if pages > 1 {
-            walker.map_adjacent(pages, self);
-        }
-
-        x86_64::instructions::tlb::flush(vaddr);
+        // TODO: make kernel specific only
+        let region = VirtualRegion::new(vaddr, pages);
+        let mapping = Mapping::new(region);
+        crate::println!("mapped {:?} -> Phys", vaddr);
+        // TODO: error handling
+        self.vmm.insert_and_map(mapping, &mut self.pmm).unwrap();
         Ok(())
     }
 
-    pub fn kunmap(&mut self, vaddr: VirtAddr) -> Result<(), Error> {
-        let frame = self.unmap(vaddr)?;
-        self.pmm.release_frame(frame);
-        self.vmm.release_region(vaddr, 1);
-        x86_64::instructions::tlb::flush(vaddr);
-        Ok(())
+    pub fn kunmap(&mut self, vaddr: VirtAddr) -> Result<(), VirtualMemoryError> {
+        self.unmap_region(vaddr, 1)
     }
 
-    /// Unmaps the specified virtual address but does not return the underlying physical frame to
-    /// the pmm. The physical frame backing a freed page table will still be returned to the pmm
-    pub fn kunmap_untracked(&mut self, vaddr: VirtAddr) {
-
-        let _ = self.unmap(vaddr);
-        self.vmm.release_region(vaddr, 1);
-        x86_64::instructions::tlb::flush(vaddr);
-    }
-
-    fn unmap(&mut self, vaddr: VirtAddr) -> Result<PhysAddr, VirtualMemoryError> {
-        let kernel_context = unsafe {
-            get_kernel_context_virt().expect("kmap unable to get kernel context").as_mut()
-        };
-
-        let mut walker = Mapper::new(vaddr, kernel_context);
-
-        loop {
-            match walker.advance() {
-                Err(MapError::BottomLevel) => break,
-                Err(MapError::NotPresent) => Err(VirtualMemoryError::UnmapNonPresent)?,
-                _ => ()
-            }
-        }
-
-        let frame = walker.unmap_next().map_err(|_| VirtualMemoryError::UnmapNonPresent)?;
-        Ok(frame)
-    }
-
-    pub fn temp_page(&mut self, vaddr: VirtAddr) -> Result<TempPageGuard, Error> {
-        self.kmap(vaddr, 1)?;
-        Ok(TempPageGuard(vaddr))
+    pub fn unmap_region(&mut self, vaddr: VirtAddr, size: usize) -> Result<(), VirtualMemoryError> {
+        self.vmm.release_region(vaddr, size, &mut self.pmm)
     }
 
     /// Identity map the provided physical address. Does not check if the memory is available for
     /// use but checks if the memory is within bounds of the entire physical memory
-    pub unsafe fn map_unchecked(&mut self, paddr: PhysAddr, size: usize) -> Result<(), MemoryManagerError> {
-        let start = paddr.as_u64() as usize;
-        let range = (start..(start + size * PAGE_SIZE)).step_by(PAGE_SIZE);
-
-        for f in range {
-            let vaddr = VirtAddr::new(f as u64);
-            let paddr = PhysAddr::new(f as u64);
-
-            self.map_frame_to_page(paddr, vaddr)?;
-        }
+    pub unsafe fn kmap_identity_mmio(&mut self, paddr: PhysAddr, size: usize) -> Result<(), MemoryManagerError> {
+        self.kmap_mmio(paddr, VirtAddr::new(paddr.as_u64()), size)?;
 
         Ok(())
+    }
+
+    pub unsafe fn kmap_mmio(&mut self, paddr: PhysAddr, vaddr: VirtAddr, size: usize) -> Result<(), MemoryManagerError> {
+        crate::println!("mapped {:?} -> {:?}", vaddr, paddr);
+        let region = vmm::VirtualRegion::new(vaddr, size);
+        let mapping = mapping::Mapping::new_mmio(region, paddr);
+        self.vmm.insert_and_map(mapping, &mut self.pmm)?;
+
+        Ok(())
+    }
+
+    pub unsafe fn kmap_mmio_anywhere(&mut self, paddr: PhysAddr, size: usize) -> Result<VirtAddr, MemoryManagerError> {
+        let region = self.vmm.first_available_addr_above(memory::mmio_area_start(), size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
+        self.kmap_mmio(paddr, region.start, size)?;
+        Ok(region.start)
     }
 
     pub fn init_pmm(&mut self, heap_range: (VirtAddr, VirtAddr), bootinfo: &KernelInfo) {
@@ -218,6 +144,9 @@ impl Drop for TempPageGuard {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    use crate::arch::PAGE_SIZE;
+    use crate::arch::x86_64::paging::Mapper;
 
     #[test_case]
     fn test_pmm_alloc_and_free() {
@@ -324,12 +253,11 @@ mod test {
     #[test_case]
     fn test_temp_page() {
         let test_addr = VirtAddr::new(0x10000);
-        let temp_page_result = MM.lock().temp_page(test_addr);
-
-        assert!(temp_page_result.is_ok());
+        MM.lock().kmap(test_addr, 1).expect("temp page test fail");
+        let temp_page_result = temp_page(test_addr);
 
         let phys_frames = MM.lock().pmm.free_frames();
-        drop(temp_page_result.unwrap());
+        drop(temp_page_result);
 
         let phys_frames_after_drop = MM.lock().pmm.free_frames();
 

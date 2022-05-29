@@ -35,5 +35,5 @@ pub(super) fn ap_init(lapic_id: usize) {
 
 /// Returns the apic id of the core the calls this
 pub fn apic_id() -> u32 {
-    smp::lapic::read_apic_id_mmio()
+    smp::lapic::Lapic::new().id()
 }

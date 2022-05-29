@@ -7,8 +7,7 @@ use crate::error::Error;
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
-use libkloader::{MemoryMapInfo};
-use libkloader::{MemoryDescriptor};
+use libkloader::{MemoryMapInfo, MemoryDescriptor};
 
 use x86_64::structures::paging::frame::{PhysFrame, PhysFrameRange};
 use x86_64::structures::paging::page::Size4KiB;
@@ -50,11 +49,11 @@ struct PhysicalRegion {
 }
 
 impl MemRegion for PhysicalRegion {
-    fn start(&self) -> usize {
+    fn region_start(&self) -> usize {
         self.start.as_u64() as usize
     }
 
-    fn end(&self) -> usize {
+    fn region_end(&self) -> usize {
         (self.start.as_u64() + self.frames as u64 * PAGE_SIZE as u64) as usize
     }
 }
@@ -64,13 +63,6 @@ impl PhysicalRegion {
     fn is_free(&self) -> bool {
         self.usage == Usage::Free
     }
-
-    /*
-    #[inline]
-    fn contains(&self, paddr: PhysAddr) -> bool {
-        self.start <= paddr && paddr < self.exclusive_end()
-    }
-    */
 
     /// Removes the specified sub region from self.
     ///
@@ -135,9 +127,9 @@ impl Ord for PhysicalRegion {
 
 impl PartialOrd for PhysicalRegion {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        if self.start() > other.end() {
+        if self.region_start() > other.region_end() {
             Some(core::cmp::Ordering::Greater)
-        } else if self.end() < other.start() {
+        } else if self.region_end() < other.region_start() {
             Some(core::cmp::Ordering::Less)
         } else {
             None
@@ -147,7 +139,7 @@ impl PartialOrd for PhysicalRegion {
 
 impl PartialEq for PhysicalRegion {
     fn eq(&self, other: &Self) -> bool {
-        self.start == other.start && self.end() == other.end()
+        self.start == other.start && self.region_end() == other.region_end()
     }
 }
 
@@ -209,6 +201,16 @@ pub struct PhysicalMemoryManager {
     frames: FrameAllocator,
 }
 
+impl super::frame_allocator::FrameAllocator for PhysicalMemoryManager {
+    fn allocate_frame(&mut self) -> PhysAddr {
+        self.request_frame()
+    }
+
+    fn deallocate_frame(&mut self, frame: PhysAddr) {
+        self.release_frame(frame)
+    }
+}
+
 impl PhysicalMemoryManager {
     pub(super) fn init(&mut self, mem_map: &[MemoryDescriptor], heap_start: VirtAddr, heap_end: VirtAddr, phys_offset: usize) {
         self.phys_offset = phys_offset;
@@ -251,7 +253,7 @@ impl PhysicalMemoryManager {
                         r1.map(|r| self.free_regions.insert(r));
                         r2.map(|r| self.free_regions.insert(r));
                     } else {
-                        if region.start() >= 0x10000 {
+                        if region.region_start() >= 0x10000 {
                             self.free_regions.insert(region);
                         } else {
                             self.free_low_memory.insert(region);
@@ -364,7 +366,12 @@ impl PhysicalMemoryManager {
     /// Allocates a frame within low memory (< 1 mb)
     pub fn request_low_memory(&mut self, addr: PhysAddr, size: usize) -> Option<PhysAddr> {
         let candidate_region = PhysicalRegion { start: addr, frames: size as u32, usage: Usage::Free };
-        self.free_low_memory.take(&candidate_region).map(|r| r.start)
+        let region = self.free_low_memory.take(&candidate_region)?;
+        let (result, remain) = region.sub_region(addr, addr + (size * PAGE_SIZE) as u64);
+        remain.0.map(|r| assert!(self.free_low_memory.insert(r)));
+        remain.1.map(|r| assert!(self.free_low_memory.insert(r)));
+
+        Some(result.start)
     }
 
     /// Request a specific physical memory region.
@@ -392,6 +399,15 @@ pub fn phys_to_virt(paddr: PhysAddr) -> VirtAddr {
     unsafe {
         VirtAddr::new(paddr.as_u64() + *PHYS_OFFSET.get_mut() as u64)
     }
+}
+
+pub unsafe fn write_physical<T: Sized + Clone>(addr: PhysAddr, value: T) {
+    (phys_to_virt(addr).as_mut_ptr() as *mut T).write(value);
+}
+
+pub unsafe fn write_physical_slice<T: Sized + Clone>(addr: PhysAddr, value: &[T]) {
+    let ptr = phys_to_virt(addr).as_mut_ptr() as *mut T;
+    core::slice::from_raw_parts_mut(ptr, value.len()).clone_from_slice(value);
 }
 
 pub(super) fn init_phys_offset(offset: usize) {
@@ -469,10 +485,8 @@ mod test {
     #[test_case]
     fn test_request_range() {
         // NOTE: This only tests finding the frame from the stack allocator and not in the regions
-        let test_addr = memory_manager().request_frame();
-        unsafe {
-            memory_manager().release_frame(test_addr.clone());
-        }
+        let test_addr = memory_manager().pmm.request_frame();
+        memory_manager().pmm.release_frame(test_addr.clone());
         let pre = memory_manager().pmm.find_frame(test_addr);
         let f = memory_manager().pmm.request_range(test_addr, 1);
         let post = memory_manager().pmm.find_frame(test_addr);

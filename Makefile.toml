@@ -10,6 +10,13 @@ CPU_CORES=2
 # so we invoke the test setup directly
 qemu_test_command = "qemu-system-x86_64 -bios /usr/share/ovmf/OVMF.fd -drive file=fat:rw:${output_dir},format=raw -nographic -d int -D log.txt --no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 -smp ${CPU_CORES}"
 
+[tasks.addr2line]
+command = "addr2line"
+args = ["-e",
+        "uefi_boot_partition/kernel/kernel.elf",
+        "${@}",
+        ]
+
 [tasks.build_bootloader]
 command = "cargo"
 args = ["build", "--manifest-path", "${bootloader_manifest}", 

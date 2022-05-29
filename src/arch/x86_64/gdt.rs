@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicUsize, Ordering, AtomicU16};
+use core::sync::atomic::{Ordering, AtomicU16};
 
 use x86_64::{structures::gdt::{GlobalDescriptorTable, Descriptor}, registers::segmentation::{CS, Segment, SegmentSelector, SS, DS, ES, GS, FS}, PrivilegeLevel};
 

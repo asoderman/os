@@ -5,11 +5,13 @@ kernel_offset = 0xffffffff80000000;
 . = kernel_offset;
 
 SECTIONS {
+    __kernel_code_start = .;
     .text ALIGN(4K) :
     {
         KEEP(*(.text*))
     }
-
+    __kernel_code_end = .;
+    __kernel_data_start = .;
     .rodata ALIGN(4K) :
     {
         KEEP(*(.rodata*))
@@ -41,4 +43,5 @@ SECTIONS {
         KEEP(*(.tbss*))
         __tbss_end = .;
     }
+    __kernel_data_end = .;
 }

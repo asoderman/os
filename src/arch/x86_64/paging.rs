@@ -1,12 +1,14 @@
 use core::{marker::PhantomData, ptr::NonNull};
 
+use crate::mm::frame_allocator::FrameAllocator;
+
 use alloc::vec::Vec;
 use x86_64::{
     structures::paging::{page_table::PageTableEntry, PageTable, PageTableIndex, PageTableFlags},
     VirtAddr, PhysAddr,
 };
 
-use crate::mm::{MemoryManager, phys_to_virt};
+use crate::mm::phys_to_virt;
 
 const MAX_PAGE_ENTRIES: usize = 511;
 
@@ -18,6 +20,12 @@ impl Drop for Flusher {
     }
 }
 
+impl Flusher {
+    fn flush(self) -> VirtAddr {
+        self.0
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum MapError {
     /// Returned if at the end of the PT structure
@@ -25,7 +33,7 @@ pub enum MapError {
     /// Returned if at the top of the PT structure
     TopLevel,
     /// Returned if a huge page is encountered when attempting to descend the structure
-    HugeFrame,
+    HugeFrame(usize),
     /// Returned if attempting to advance on a non present entry.
     NotPresent,
     /// Returned when trying to create a new mapping on an existing entry. This can be ignored with
@@ -70,7 +78,7 @@ impl<'a> Mapper<'a> {
         let entry = &self.current()[index];
 
         if entry.is_unused() { return Err(MapError::NotPresent) }
-        if entry.flags().contains(PageTableFlags::HUGE_PAGE) { return Err(MapError::HugeFrame) }
+        if entry.flags().contains(PageTableFlags::HUGE_PAGE | PageTableFlags::PRESENT) { return Err(MapError::HugeFrame(self.current_level)) }
 
         let next_addr = entry.addr();
         let next_vaddr = phys_to_virt(next_addr);
@@ -128,7 +136,6 @@ impl<'a> Mapper<'a> {
     }
 
     /// Mutably borrow the entry in the current table that corresponds to the next table.
-    #[inline]
     pub fn next_entry(&mut self) -> &mut PageTableEntry {
         let index = self.next_index();
         &mut self.current()[index]
@@ -137,16 +144,16 @@ impl<'a> Mapper<'a> {
     /// Maps next entry and marks it present.
     ///
     /// returns Error if the entry is already marked present.
-    pub fn map_next(&mut self, mm: &mut MemoryManager) -> Result<(), MapError> {
+    pub fn map_next(&mut self, frame_allocator: &mut dyn FrameAllocator) -> Result<(), MapError> {
         let entry = self.next_entry();
         if !entry.is_unused() { return Err(MapError::PresentEntry); }
 
-        let frame = mm.request_frame();
+        let frame = frame_allocator.allocate_frame();
         entry.set_addr(frame, PageTableFlags::WRITABLE | PageTableFlags::PRESENT);
         Ok(())
     }
 
-    pub fn map_frame(&mut self, frame: PhysAddr, mm: &mut MemoryManager) -> Result<Flusher, MapError> {
+    pub fn map_frame(&mut self, frame: PhysAddr, frame_allocator: &mut dyn FrameAllocator) -> Result<Flusher, MapError> {
 
         loop {
             // Ensure everything is writable by default
@@ -155,7 +162,7 @@ impl<'a> Mapper<'a> {
             match self.advance() {
                 Err(MapError::NotPresent) => {
                     if self.current_level != 1 {
-                        self.map_next(mm)?
+                        self.map_next(frame_allocator)?
                     }
                 },
                 Err(MapError::BottomLevel) =>  { 
@@ -166,13 +173,18 @@ impl<'a> Mapper<'a> {
                 Err(e) => { Err(e)? },
                 _ => {
                     self.next_entry().flags().set(PageTableFlags::WRITABLE, true);
-                    if !self.next_entry().flags().contains(PageTableFlags::WRITABLE) {
+                    if !self.next_entry().flags().contains(PageTableFlags::WRITABLE) && self.next_entry().flags().contains(PageTableFlags::PRESENT) {
                         self.next_entry().set_flags(PageTableFlags::WRITABLE | PageTableFlags::PRESENT);
                         assert!(self.next_entry().flags().contains(PageTableFlags::WRITABLE));
                     }
                 },
             }
         }
+    }
+
+    pub fn map(&mut self, frame_allocator: &mut dyn FrameAllocator) -> Result<Flusher, MapError> {
+        let frame = frame_allocator.allocate_frame();
+        self.map_frame(frame, frame_allocator)
     }
 
     /// Unmaps the entry the walker would advance to next.
@@ -185,8 +197,53 @@ impl<'a> Mapper<'a> {
         Ok(frame)
     }
 
+    /// Unmaps a range of frames
+    ///
+    /// Flushes the unmapped address fromt he TLB
+    pub fn unmap(&mut self, _count: usize, frame_allocator: &mut dyn FrameAllocator, cleanup: bool) -> Result<PhysAddr, MapError> {
+        loop {
+            match self.advance() {
+                Err(MapError::BottomLevel) => break,
+                Ok(()) => (),
+                _ => Err(MapError::NotPresent)?,
+            }
+        }
+
+        let frame = self.unmap_next()?;
+
+        if cleanup {
+            loop {
+                if self.current_is_empty() {
+                    match self.ascend() {
+                        Err(MapError::TopLevel) => break,
+                        _ => ()
+                    }
+
+                    frame_allocator.deallocate_frame(self.unmap_next()?);
+
+                    if !self.current_is_empty() {
+                        crate::println!("Remaining entries: {:?}", self.entries_used_by_current());
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        x86_64::instructions::tlb::flush(self.addr);
+        Ok(frame)
+    }
+
+    fn current_is_empty(&mut self) -> bool {
+        self.current().iter().map(|e| e.is_unused()).fold(true, |acc, elem| acc && elem)
+    }
+
+    fn entries_used_by_current(&mut self) -> Vec<(usize, &PageTableEntry)> {
+        self.current().iter().enumerate().filter(|e| !e.1.is_unused()).collect()
+    }
+
     /// Map the pages that are adjacent to the address provided.
-    pub fn map_adjacent(&mut self, pages: usize, mm: &mut MemoryManager) {
+    pub fn map_adjacent(&mut self, pages: usize, mm: &mut dyn FrameAllocator) {
         // TODO: this function will not work across page table boundaries. e.g. if
         // l1_pagetable[511] is mapped it will attempt to map l1_pagetable[512] and presumably
         // crash
@@ -202,7 +259,7 @@ impl<'a> Mapper<'a> {
         }
 
         for i in map_range {
-            let frame = mm.request_frame();
+            let frame = mm.allocate_frame();
             // if we cross a page table boundary
             if i % 512 == 0 && i != 0 {
                 self.ascend().unwrap();
@@ -243,6 +300,6 @@ mod test {
         assert!(pt_walker.advance().is_ok(), "page level 2 panic");
         let walk_result = pt_walker.advance();
         assert!(walk_result.is_err(), "page level 1 should not exist because huge page");
-        assert!(walk_result.unwrap_err() == MapError::HugeFrame, "Expected huge page");
+        assert!(walk_result.unwrap_err() == MapError::HugeFrame(2), "Expected huge page");
     }
 }
