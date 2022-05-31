@@ -222,7 +222,7 @@ impl<'a> Mapper<'a> {
                     frame_allocator.deallocate_frame(self.unmap_next()?);
 
                     if !self.current_is_empty() {
-                        crate::println!("Remaining entries: {:?}", self.entries_used_by_current());
+                        // crate::println!("Remaining entries: {:?}", self.entries_used_by_current());
                     }
                 } else {
                     break;

@@ -69,7 +69,6 @@ impl PhysicalRegion {
     /// # Returns
     /// a tuple of (sub_region, (region before, region after))
     fn sub_region(mut self, start: PhysAddr, end: PhysAddr) -> (PhysicalRegion, (Option<PhysicalRegion>, Option<PhysicalRegion>)) {
-        crate::println!("getting sub region {:?} -> {:?}", start, end);
         let end_region_size = (self.exclusive_end() - end) / PAGE_SIZE as u64;
         let sub_region_size = (end - start) / PAGE_SIZE as u64;
         let end_region = self.split(end_region_size as u32);
@@ -78,7 +77,6 @@ impl PhysicalRegion {
             (self, (None, end_region))
         } else {
             let sub_region = self.split(sub_region_size as u32);
-            crate::println!("sub region result {:?}", sub_region);
             (sub_region.unwrap(), (Some(self), end_region))
         }
     }

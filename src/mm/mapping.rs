@@ -197,7 +197,6 @@ impl Mapping {
     }
 
     pub fn unmap(self, pt: &mut PageTable, frame_allocator: &mut dyn FrameAllocator, cleanup: bool) -> Result<(), VirtualMemoryError> {
-        crate::println!("Unmapping {:#?}", self.range);
         for (_i, page) in self.range.pages().into_iter().enumerate() {
             let mut walker = Mapper::new(page, pt);
 

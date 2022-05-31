@@ -15,7 +15,6 @@ pub use pmm::phys_to_virt;
 pub use pmm::get_init_heap_section;
 pub use error::MemoryManagerError;
 
-use self::frame_allocator::FrameAllocator;
 use self::mapping::Mapping;
 use self::pmm::PhysicalMemoryManager;
 use self::vmm::{VirtualMemoryManager, VirtualMemoryError, VirtualRegion};
@@ -55,7 +54,6 @@ impl MemoryManager {
         let frame = self.pmm.request_low_memory(paddr, size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
         assert_eq!(frame, paddr);
         let mapping = mapping::Mapping::new_identity(frame);
-        crate::println!("id mapping: {:#X?}", mapping);
         self.vmm.insert_and_map(mapping, &mut self.pmm)?;
         Ok(())
 
@@ -66,7 +64,6 @@ impl MemoryManager {
         // TODO: make kernel specific only
         let region = VirtualRegion::new(vaddr, pages);
         let mapping = Mapping::new(region);
-        crate::println!("mapped {:?} -> Phys", vaddr);
         // TODO: error handling
         self.vmm.insert_and_map(mapping, &mut self.pmm).unwrap();
         Ok(())
@@ -89,7 +86,6 @@ impl MemoryManager {
     }
 
     pub unsafe fn kmap_mmio(&mut self, paddr: PhysAddr, vaddr: VirtAddr, size: usize) -> Result<(), MemoryManagerError> {
-        crate::println!("mapped {:?} -> {:?}", vaddr, paddr);
         let region = vmm::VirtualRegion::new(vaddr, size);
         let mapping = mapping::Mapping::new_mmio(region, paddr);
         self.vmm.insert_and_map(mapping, &mut self.pmm)?;
@@ -105,7 +101,6 @@ impl MemoryManager {
 
     pub fn init_pmm(&mut self, heap_range: (VirtAddr, VirtAddr), bootinfo: &KernelInfo) {
         pmm::init_phys_offset(bootinfo.phys_offset as usize);
-        // TODO: pass the kernel phys location via KernelInfo 
         let mem_map = bootinfo.mem_map_info.get_memory_map();
         self.pmm.init(mem_map, heap_range.0, heap_range.1, bootinfo.phys_offset as usize);
     }
@@ -150,16 +145,17 @@ mod test {
 
     #[test_case]
     fn test_pmm_alloc_and_free() {
-        let get_count  = || { MM.lock().pmm.frame_count() };
+        // Take lock for duration of test
+        let mut mm = MM.lock();
 
-        let starting_frames_in_alloc = get_count();
-        let frame = MM.lock().pmm.request_frame();
-        let frame2 = MM.lock().pmm.request_frame();
-        let frame_count_after_alloc = get_count();
+        let starting_frames_in_alloc = mm.pmm.frame_count();
+        let frame = mm.pmm.request_frame();
+        let frame2 = mm.pmm.request_frame();
+        let frame_count_after_alloc = mm.pmm.frame_count();
 
-        MM.lock().pmm.release_frame(frame);
-        MM.lock().pmm.release_frame(frame2);
-        let frame_count_after_free = get_count();
+        mm.pmm.release_frame(frame);
+        mm.pmm.release_frame(frame2);
+        let frame_count_after_free = mm.pmm.frame_count();
 
         assert_ne!(frame, frame2);
         // TODO: Split these into two seperate test cases 
@@ -182,49 +178,58 @@ mod test {
         let region_size = 4;
         let within_test_region = test_region + 0x1000u64;
         let adjacent_region_start = test_region + region_size as u64 * PAGE_SIZE as u64;
-        assert!(MM.lock().vmm
+
+        // Take lock for duration of test 
+        let mut mm = MM.lock();
+        assert!(mm.vmm
             .reserve_region(test_region, region_size)
             .is_ok());
         // Assert reservation of same region is rejected
         assert!(
-            MM.lock().vmm
+            mm.vmm
                 .reserve_region(test_region, region_size)
                 .is_err(),
             "VMM did not reject already reserved region"
         );
         assert!(
-            MM.lock().vmm
+            mm.vmm
                 .reserve_region(test_region, region_size + 1)
                 .is_err(),
             "VMM did not reject reserved super-region"
         );
         assert!(
-            MM.lock().vmm
+            mm.vmm
                 .reserve_region(test_region, 1)
                 .is_err(),
             "VMM did not reject reserved sub-region"
         );
         assert!(
-            MM.lock().vmm
+            mm.vmm
                 .reserve_region(within_test_region, 1)
                 .is_err(),
             "VMM did not reject reserved sub-region with different starts"
         );
         assert!(
-            MM.lock().vmm
+            mm.vmm
                 .reserve_region(within_test_region, region_size)
                 .is_err(),
             "VMM did not reject overlapping region"
         );
 
-        assert!(MM.lock().vmm.reserve_region(adjacent_region_start, 1).is_ok(), "unable to reserve adjacent region. incorrect rejection");
+        assert!(mm.vmm.reserve_region(adjacent_region_start, 1).is_ok(), "unable to reserve adjacent region. incorrect rejection");
     }
 
     #[test_case]
     fn test_kmap_kunmap() {
         let test_addr = VirtAddr::new(0x10000);
-        let kmap_result = MM.lock().kmap(test_addr, 2);
+        // take lock for duration of the test 
+        let mut mm = MM.lock();
+        // take the free frames before touching any memory
+        let pmm_frames = mm.pmm.free_frames();
+
+        let kmap_result = mm.kmap(test_addr, 2);
         assert!(kmap_result.is_ok());
+
         unsafe { 
             (test_addr.as_mut_ptr() as *mut bool).write(true);
             assert!(*(test_addr.as_mut_ptr() as *mut bool));
@@ -232,35 +237,34 @@ mod test {
             assert!(*(test_addr.as_mut_ptr() as *mut bool).add(0x1000));
         }
 
-        let pmm_frames = MM.lock().pmm.free_frames();
 
         let mut test_pt_walker = unsafe {
             Mapper::new(test_addr, get_kernel_context_virt().unwrap().as_mut())
         };
-        let kunmap_result = MM.lock().kunmap(test_addr);
+        let kunmap_result = mm.kunmap(test_addr);
 
         assert!(kunmap_result.is_ok());
 
-        let pmm_frames_after_unmap = MM.lock().pmm.free_frames();
+        let pmm_frames_after_unmap = mm.pmm.free_frames();
 
         test_pt_walker.walk();
         assert!(test_pt_walker.next_entry().is_unused());
-        // TODO: unmap only free a single page/frame this will need to be changed once it frees an
-        // entire range
-        assert_eq!(pmm_frames + 1, pmm_frames_after_unmap);
+        assert_eq!(pmm_frames, pmm_frames_after_unmap);
     }
 
     #[test_case]
     fn test_temp_page() {
+        // TODO: is there a way to test this while holding the lock the entire time?
+        // If a region is freed before we drop the temp page the test will fail
         let test_addr = VirtAddr::new(0x10000);
+        let phys_frames = MM.lock().pmm.free_frames();
         MM.lock().kmap(test_addr, 1).expect("temp page test fail");
         let temp_page_result = temp_page(test_addr);
 
-        let phys_frames = MM.lock().pmm.free_frames();
         drop(temp_page_result);
 
         let phys_frames_after_drop = MM.lock().pmm.free_frames();
 
-        assert_eq!(phys_frames + 1, phys_frames_after_drop);
+        assert_eq!(phys_frames, phys_frames_after_drop);
     }
 }
