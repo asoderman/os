@@ -7,7 +7,8 @@ use core::arch::asm;
 /// The starting kernel stack. On x64 this is the initial value of rsp
 static mut STARTING_KERNEL_STACK_ADDR: u64 = 0;
 
-const KERNEL_STACK_SIZE_BYTES: usize = 4 * PAGE_SIZE;
+const KERNEL_STACK_SIZE: usize = 4;
+const KERNEL_STACK_SIZE_BYTES: usize = KERNEL_STACK_SIZE * PAGE_SIZE;
 
 pub fn set_stack_start(rsp: u64) {
     unsafe { STARTING_KERNEL_STACK_ADDR = rsp; }
@@ -37,7 +38,7 @@ static mut KERNEL_STACKS_ALLOCATED: usize = 1;
 /// the end of the kernel stack i.e. that stack ptr
 pub fn allocate_kernel_stack() -> VirtAddr {
     let new_stack_base = unsafe {
-        VirtAddr::new(STARTING_KERNEL_STACK_ADDR + (PAGE_SIZE * KERNEL_STACKS_ALLOCATED) as u64).align_up(PAGE_SIZE as u64)
+        VirtAddr::new(STARTING_KERNEL_STACK_ADDR + (KERNEL_STACK_SIZE * PAGE_SIZE * KERNEL_STACKS_ALLOCATED) as u64).align_up(PAGE_SIZE as u64)
     };
 
     crate::println!("Allocating stack at base: {:?}", new_stack_base);

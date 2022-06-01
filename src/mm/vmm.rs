@@ -120,6 +120,7 @@ impl VirtualMemoryManager {
         let kernel_pt = unsafe {
             get_kernel_context_virt().unwrap().as_mut()
         };
+        // FIXME: Should throw an error if attempting to overwrite
         mapping.map(kernel_pt, frame_allocator).unwrap();
         self.insert_mapping(mapping)?;
         Ok(())
