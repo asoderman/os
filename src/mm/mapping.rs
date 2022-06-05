@@ -162,7 +162,7 @@ impl Mapping {
     }
 
     /// Map the pages to the provided frames
-    pub fn map(&mut self, pt: &mut PageTable, frame_allocator: &mut dyn FrameAllocator) -> Result<(), MapError> {
+    pub fn map(&mut self, pt: &mut PageTable, frame_allocator: &mut impl FrameAllocator) -> Result<(), MapError> {
         match self.kind {
             MappingType::MMIO(paddr) | MappingType::Identity(paddr) => {
                 for (i, page) in self.range.pages().into_iter().enumerate() {
@@ -196,7 +196,7 @@ impl Mapping {
         Ok(())
     }
 
-    pub fn unmap(self, pt: &mut PageTable, frame_allocator: &mut dyn FrameAllocator, cleanup: bool) -> Result<(), VirtualMemoryError> {
+    pub fn unmap(self, pt: &mut PageTable, frame_allocator: &mut impl FrameAllocator, cleanup: bool) -> Result<(), VirtualMemoryError> {
         for (_i, page) in self.range.pages().into_iter().enumerate() {
             let mut walker = Mapper::new(page, pt);
 

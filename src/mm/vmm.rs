@@ -116,7 +116,7 @@ impl VirtualMemoryManager {
         }
     }
 
-    pub(super) fn insert_and_map(&mut self, mut mapping: Mapping, frame_allocator: &mut dyn FrameAllocator) -> Result<(), Error> {
+    pub(super) fn insert_and_map(&mut self, mut mapping: Mapping, frame_allocator: &mut impl FrameAllocator) -> Result<(), Error> {
         let kernel_pt = unsafe {
             get_kernel_context_virt().unwrap().as_mut()
         };
@@ -145,7 +145,7 @@ impl VirtualMemoryManager {
     }
 
     /// Removes and unmaps the region containing the region provided as arguments
-    pub fn release_region(&mut self, vaddr: VirtAddr, size: usize, frame_allocator: &mut dyn FrameAllocator) -> Result<(), VirtualMemoryError> {
+    pub fn release_region(&mut self, vaddr: VirtAddr, size: usize, frame_allocator: &mut impl FrameAllocator) -> Result<(), VirtualMemoryError> {
         let kernel_pt = unsafe {
             get_kernel_context_virt().unwrap().as_mut()
         };

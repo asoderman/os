@@ -144,7 +144,7 @@ impl<'a> Mapper<'a> {
     /// Maps next entry and marks it present.
     ///
     /// returns Error if the entry is already marked present.
-    pub fn map_next(&mut self, frame_allocator: &mut dyn FrameAllocator) -> Result<(), MapError> {
+    pub fn map_next(&mut self, frame_allocator: &mut impl FrameAllocator) -> Result<(), MapError> {
         let entry = self.next_entry();
         if !entry.is_unused() { return Err(MapError::PresentEntry); }
 
@@ -153,7 +153,7 @@ impl<'a> Mapper<'a> {
         Ok(())
     }
 
-    pub fn map_frame(&mut self, frame: PhysAddr, frame_allocator: &mut dyn FrameAllocator) -> Result<Flusher, MapError> {
+    pub fn map_frame(&mut self, frame: PhysAddr, frame_allocator: &mut impl FrameAllocator) -> Result<Flusher, MapError> {
 
         loop {
             // Ensure everything is writable by default
@@ -182,7 +182,7 @@ impl<'a> Mapper<'a> {
         }
     }
 
-    pub fn map(&mut self, frame_allocator: &mut dyn FrameAllocator) -> Result<Flusher, MapError> {
+    pub fn map(&mut self, frame_allocator: &mut impl FrameAllocator) -> Result<Flusher, MapError> {
         let frame = frame_allocator.allocate_frame();
         self.map_frame(frame, frame_allocator)
     }
@@ -200,7 +200,7 @@ impl<'a> Mapper<'a> {
     /// Unmaps a range of frames
     ///
     /// Flushes the unmapped address fromt he TLB
-    pub fn unmap(&mut self, _count: usize, frame_allocator: &mut dyn FrameAllocator, cleanup: bool) -> Result<PhysAddr, MapError> {
+    pub fn unmap(&mut self, _count: usize, frame_allocator: &mut impl FrameAllocator, cleanup: bool) -> Result<PhysAddr, MapError> {
         loop {
             match self.advance() {
                 Err(MapError::BottomLevel) => break,
@@ -243,7 +243,7 @@ impl<'a> Mapper<'a> {
     }
 
     /// Map the pages that are adjacent to the address provided.
-    pub fn map_adjacent(&mut self, pages: usize, mm: &mut dyn FrameAllocator) {
+    pub fn map_adjacent(&mut self, pages: usize, mm: &mut impl FrameAllocator) {
         // TODO: this function will not work across page table boundaries. e.g. if
         // l1_pagetable[511] is mapped it will attempt to map l1_pagetable[512] and presumably
         // crash
