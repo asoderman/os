@@ -26,8 +26,7 @@ times 8 - ($ - trampoline) nop
     ; 5: Page Address Extension
     ; 4: Page Size Extension
     mov eax, cr4
-    ;or eax, 1 << 18 | 1 << 10 | 1 << 9 | 1 << 7 |
-    or eax, 1 << 5 | 1 << 4
+    or eax, 1 << 18 | 1 << 10 | 1 << 9 | 1 << 7 | 1 << 5 | 1 << 4
     mov cr4, eax
 
     lgdt [gdtr]

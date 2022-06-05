@@ -78,7 +78,10 @@ fn main(bootinfo: &KernelInfo) {
 
     mm::init(heap_init_result, bootinfo);
 
+    println!("{:#X?}", mm::memory::memory_layout());
+
     arch::x86_64::platform_init(bootinfo);
+
     println!("Initializing interrupts");
     println!("est stack usage: {:#X}", bootinfo.rsp - stack::get_rsp());
     interrupt::init().unwrap_or_else(|_| {
@@ -88,12 +91,21 @@ fn main(bootinfo: &KernelInfo) {
     #[cfg(test)]
     test_main();
 
+    todo!("Set up scheduler");
     loop {}
+}
+
+pub fn ap_main() {
+    println!("ap main reached. waiting for scheduler");
+    loop {
+        // Wait for scheduler
+    }
 }
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    println!("KERNEL PANIC: {}", info);
+    let core = arch::x86_64::apic_id();
+    println!("KERNEL PANIC on core {}: {}", core, info);
     loop {}
 }
 

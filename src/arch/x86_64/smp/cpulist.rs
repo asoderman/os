@@ -1,29 +1,24 @@
-use core::sync::atomic::AtomicBool;
-
 use super::Core;
 
 use alloc::vec::Vec;
-use spin::{RwLock, RwLockReadGuard};
-use lazy_static::lazy_static;
+use spin::RwLock;
+use spin::Once;
 
-static INIT: AtomicBool = AtomicBool::new(false);
+static CPU_LIST: Once<Vec<RwLock<Core>>> = Once::new();
 
-lazy_static! {
-    static ref CPU_LIST: RwLock<Vec<Core>> = RwLock::new(Vec::new());
+pub fn cpu_list<'c>() -> &'c [RwLock<Core>] {
+    CPU_LIST.get().expect("Attempted to get cpu list before initialization").as_slice()
 }
 
-pub fn cpu_list<'c>() -> RwLockReadGuard<'c, Vec<Core>> {
-    CPU_LIST.read()
+pub(super) fn init_cpu_list(cores: Vec<Core>) -> usize {
+    CPU_LIST.call_once(move || {
+        let mut cores = cores;
+        cores.sort_by_key(|c| c.local_apic_id);
+        let list = cores.into_iter().map(|c| RwLock::new(c)).collect();
+        list
+    });
+    unsafe {
+        CPU_LIST.get_unchecked().len()
+    }
 }
 
-pub(super) fn add_core(bsp: Core) {
-    if INIT.load(core::sync::atomic::Ordering::SeqCst) { panic!("Added core after cpu list is finalized"); }
-    CPU_LIST.write().push(bsp);
-}
-
-/// Locks and sorts the CPU list and returns the core count
-pub(super) fn finalize() -> usize {
-    INIT.store(true, core::sync::atomic::Ordering::SeqCst);
-    CPU_LIST.write().sort_by_key(|c| c.local_apic_id);
-    CPU_LIST.read().len()
-}

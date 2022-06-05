@@ -6,6 +6,7 @@ pub use x86_64::{PhysAddr, VirtAddr};
 pub mod cpu;
 pub mod idt;
 mod gdt;
+mod lapic_timer;
 pub mod paging;
 mod pic;
 mod pit;
@@ -31,9 +32,13 @@ pub(super) fn ap_init(lapic_id: usize) {
     }
     idt::init_idt().expect("Could not load IDT on ap");
     smp::thread_local::init_thread_local(lapic_id);
+    smp::CpuLocals::init(lapic_id);
+    smp::lapic::Lapic::new().initialize().expect("Failed to initialize LAPIC for ap!");
 }
 
 /// Returns the apic id of the core the calls this
 pub fn apic_id() -> u32 {
-    smp::lapic::Lapic::new().id()
+    smp::CpuLocals::try_get().map(|local| local.lapic_id as u32).unwrap_or_else(|| {
+        smp::lapic::Lapic::new().id()
+    })
 }

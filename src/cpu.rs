@@ -14,6 +14,6 @@ fn lapic_id() -> u32 {
 }
 
 fn core_to_lapic(core_id: CoreId) -> Option<u32> {
-    crate::arch::x86_64::smp::cpu_list().get(core_id.0).map(|cpu| cpu.local_apic_id)
+    crate::arch::x86_64::smp::cpu_list().get(core_id.0).map(|cpu| cpu.read().local_apic_id)
 }
 

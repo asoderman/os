@@ -11,6 +11,7 @@ static mut TLS_SIZE: AtomicUsize = AtomicUsize::new(0);
 static mut TLS_INIT: AtomicBool = AtomicBool::new(false);
 
 const FS_BASE_MSR: u32 = 0xC0000100;
+// TODO: Use gsbase for kernel thread_locals once supported
 #[allow(dead_code)]
 const GS_BASE_MSR: u32 = 0xC0000101;
 

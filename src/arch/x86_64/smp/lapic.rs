@@ -1,10 +1,10 @@
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::AtomicBool;
 
 use x86_64::{PhysAddr, registers::model_specific::Msr, VirtAddr};
 
-use crate::mm::{memory_manager, temp_page};
+use crate::{mm::memory_manager, arch::x86_64::lapic_timer::LapicTimer};
 
-use super::super::pic::PICS;
+use super::{super::pic::PICS, trampoline::Trampoline};
 
 use bitfield::bitfield;
 use spin::once::Once;
@@ -23,13 +23,18 @@ const SIV_ENABLE: u32 = 0x100;
 const SPURIOUS_INTERRUPT_NUM: u32 = 0xFF;
 const ICR_LOW: usize = 0x300;
 const ICR_HIGH: usize = 0x310;
+const APIC_TMRDIV: usize = 0x3E0;
+const APIC_TMR_INITCNT: usize = 0x380;
+const APIC_TMRCURRCNT: usize = 0x390;
+const APIC_LVT_TMR: usize= 0x320;
+const APIC_NMI: usize = (4<<8);
 
 static ENABLE_APIC_MSR: Once = Once::new();
 
 static PIC_DISABLED: AtomicBool = AtomicBool::new(false);
 
 /// The Lapic base read from the madt
-pub static mut LAPIC_BASE: AtomicUsize = AtomicUsize::new(usize::max_value());
+pub static mut LAPIC_BASE: Once<usize> = Once::new();
 
 bitfield! {
     /// The interrupt command register for the LAPIC
@@ -103,17 +108,15 @@ bitfield! {
     pub dst, set_dst: 27, 24;
 }
 
-
 pub enum Ipi {
     Init(bool),
     Sipi(u8),
 }
 
-#[derive(Debug, PartialEq, Eq)]
 pub struct Lapic {
-    /// The IA32_APIC_BASE
+    /// The IA32_APIC_BASE mapped to a virtual address
     vaddr: VirtAddr,
-    x2: bool
+    x2: bool,
 }
 
 impl Drop for Lapic {
@@ -126,7 +129,7 @@ impl Lapic {
     /// Create an interface to the local apic and map the registers into memory.
     pub fn new() -> Self {
         unsafe {
-            let base_phys = PhysAddr::new(LAPIC_BASE.load(Ordering::SeqCst) as u64);
+            let base_phys = PhysAddr::new(*LAPIC_BASE.get_unchecked() as u64);
             if base_phys.as_u64() == u64::max_value() { panic!("LAPIC_BASE not set") }
             let vaddr = memory_manager().kmap_mmio_anywhere(base_phys, 1).expect("Could not map lapic");
             crate::println!("Mapping lapic to {:?}", vaddr);
@@ -140,6 +143,8 @@ impl Lapic {
 
     /// Initialize the CPU lapic. Disables interrupts on the core then disables the PIC if not
     /// already disabled. Then writes to the spurious interrupt vector to enable the LAPIC.
+    ///
+    /// Finally calibrates the LAPIC timer to interrupt every 10 ms using the PIT
     pub fn initialize(&self) -> Result<(), ()> {
 
         crate::interrupt::disable_interrupts();
@@ -161,7 +166,15 @@ impl Lapic {
             self.write_siv(SIV_ENABLE | SPURIOUS_INTERRUPT_NUM);
         }
         self.eoi();
+
+        self.timer().calibrate().unwrap();
+
+        self.eoi();
         Ok(())
+    }
+
+    pub fn timer(&self) -> LapicTimer {
+        LapicTimer::new(self)
     }
 
     /// Read the lapic id register
@@ -173,9 +186,11 @@ impl Lapic {
 
     /// Allocates a trampoline in low memory then performs the universal startup algorithm
     /// specified by Intel
-    pub fn wake_core(&self, lapic_id: u32) -> Result<(), ()> {
+    pub(super) fn wake_core(&self, lapic_id: u32, trampoline: &mut Trampoline) -> Result<(), ()> {
 
-        let trampoline_vec = super::trampoline::Trampoline::new(lapic_id);
+        let trampoline_vec = trampoline.vector();
+
+        trampoline.configure(lapic_id as usize);
 
         // Universal startup algorithm
         self.send_interrupt(Ipi::Init(true), lapic_id).unwrap();
@@ -186,7 +201,7 @@ impl Lapic {
 
         crate::println!("Wake core sent");
 
-        loop {} // TODO: REMOVE THIS
+        super::trampoline::wait_for_core(lapic_id as usize);
 
         Ok(())
     }
@@ -281,6 +296,62 @@ impl Lapic {
         unsafe {
             core::ptr::write_volatile(addr as *mut u8, 0);
         }
+    }
+
+    const APIC_MASK_TMR: u32 = 1 << 16;
+    pub fn mask_timer(&self) {
+        let value = self.read_lvt_timer_reg();
+        self.write_apic_lvt_tmr(value | Lapic::APIC_MASK_TMR)
+    }
+
+    pub fn unmask_timer(&self) {
+        let value = self.read_lvt_timer_reg();
+        // mask the timer mask bit. ensure its off but dont touch anything else
+        let mask = u32::max_value() ^ Lapic::APIC_MASK_TMR;
+        self.write_apic_lvt_tmr(value & mask)
+    }
+
+    fn write_apic_lvt_tmr(&self, value: u32) {
+        unsafe {
+            let addr = (self.vaddr.as_mut_ptr() as *mut u8).add(APIC_LVT_TMR);
+            core::ptr::write_volatile(addr as *mut u32, value);
+        }
+    }
+
+    fn read_lvt_timer_reg(&self) -> u32 {
+        unsafe {
+            let addr = (self.vaddr.as_mut_ptr() as *mut u8).add(APIC_LVT_TMR);
+            core::ptr::read_volatile(addr as *mut u32)
+        }
+    }
+
+    pub fn write_apic_register_initcnt(&self, value: u32) {
+        unsafe {
+            let addr = (self.vaddr.as_mut_ptr() as *mut u8).add(APIC_TMR_INITCNT);
+            core::ptr::write_volatile(addr as *mut u32, value);
+        }
+    }
+
+    pub fn write_apic_timer_div(&self, value: u32) {
+        unsafe {
+            let addr = (self.vaddr.as_mut_ptr() as *mut u8).add(APIC_TMRDIV);
+            core::ptr::write_volatile(addr as *mut u32, value);
+        }
+    }
+
+    pub fn read_apic_timer_current_count(&self) -> u32 {
+        unsafe {
+            let addr = (self.vaddr.as_mut_ptr() as *const u8).add(APIC_TMRCURRCNT);
+            core::ptr::read_volatile(addr as *const u32)
+
+        }
+    }
+}
+
+/// Set the LAPIC base read from the MADT. This physical address is used to map the lapic via MMIO
+pub(super) fn set_base(addr: PhysAddr) {
+    unsafe {
+        LAPIC_BASE.call_once(|| addr.as_u64() as usize);
     }
 }
 
