@@ -23,6 +23,7 @@ const SIV_ENABLE: u32 = 0x100;
 const SPURIOUS_INTERRUPT_NUM: u32 = 0xFF;
 const ICR_LOW: usize = 0x300;
 const ICR_HIGH: usize = 0x310;
+const APIC_TASKPRIOR: usize = 0x80;
 const APIC_TMRDIV: usize = 0x3E0;
 const APIC_TMR_INITCNT: usize = 0x380;
 const APIC_TMRCURRCNT: usize = 0x390;
@@ -167,14 +168,27 @@ impl Lapic {
         }
         self.eoi();
 
+        self.write_task_priority_reg(0);
+
         self.timer().calibrate().unwrap();
+        self.timer().set_interrupt_number(crate::interrupt::number::Interrupt::Timer);
+        self.timer().set_periodic_mode();
 
         self.eoi();
+        self.unmask_timer();
         Ok(())
     }
 
     pub fn timer(&self) -> LapicTimer {
         LapicTimer::new(self)
+    }
+
+    fn write_task_priority_reg(&self, val: u32) {
+        unsafe {
+            let addr = (self.vaddr.as_mut_ptr() as *mut u8).add(APIC_TASKPRIOR) as *mut u32;
+            core::ptr::write_volatile(addr, val);
+        }
+
     }
 
     /// Read the lapic id register
@@ -291,10 +305,10 @@ impl Lapic {
         }
     }
 
-    fn eoi(&self) {
+    pub fn eoi(&self) {
         let addr = self.vaddr.as_u64() as usize + EOI_REGISTER;
         unsafe {
-            core::ptr::write_volatile(addr as *mut u8, 0);
+            core::ptr::write_volatile(addr as *mut u32, 0);
         }
     }
 
@@ -311,14 +325,14 @@ impl Lapic {
         self.write_apic_lvt_tmr(value & mask)
     }
 
-    fn write_apic_lvt_tmr(&self, value: u32) {
+    pub fn write_apic_lvt_tmr(&self, value: u32) {
         unsafe {
             let addr = (self.vaddr.as_mut_ptr() as *mut u8).add(APIC_LVT_TMR);
             core::ptr::write_volatile(addr as *mut u32, value);
         }
     }
 
-    fn read_lvt_timer_reg(&self) -> u32 {
+    pub fn read_lvt_timer_reg(&self) -> u32 {
         unsafe {
             let addr = (self.vaddr.as_mut_ptr() as *mut u8).add(APIC_LVT_TMR);
             core::ptr::read_volatile(addr as *mut u32)

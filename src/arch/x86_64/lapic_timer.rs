@@ -8,6 +8,7 @@ static mut LAPIC_TICKS_PER_10_MS: AtomicUsize = AtomicUsize::new(0);
 
 pub struct LapicTimer<'lapic> {
     lapic: &'lapic Lapic,
+    ticks_per_10_ms: usize,
 }
 
 impl<'lapic> LapicTimer<'lapic> {
@@ -15,11 +16,19 @@ impl<'lapic> LapicTimer<'lapic> {
     pub fn new(lapic: &'lapic Lapic) -> Self {
         LapicTimer {
             lapic,
+            ticks_per_10_ms: 0,
         }
     }
 
-    pub fn set_interrupt_number(&self, value: u16) {
+    pub fn set_interrupt_number(&self, value: u8) {
+        let reg = self.lapic.read_lvt_timer_reg() & 0xFFFFF00;
+        self.lapic.write_apic_lvt_tmr(reg | value as u32);
+    }
 
+    pub(super) fn set_periodic_mode(&self) {
+        let reg = self.lapic.read_lvt_timer_reg() & 0xFFFFFFF;
+        // https://wiki.osdev.org/APIC_timer
+        self.lapic.write_apic_lvt_tmr(reg | 0x20000);
     }
 
     /// Enables the lapic timer
@@ -31,7 +40,7 @@ impl<'lapic> LapicTimer<'lapic> {
         self.lapic.mask_timer();
     }
 
-    pub(super) fn calibrate(&self) -> Result<(), ()> {
+    pub(super) fn calibrate(&mut self) -> Result<(), ()> {
         const START_COUNT: u32 = 0xFFFFFFFF;
         // Tell apic timer to use divider 16
         self.lapic.write_apic_timer_div(0x3);
@@ -48,10 +57,9 @@ impl<'lapic> LapicTimer<'lapic> {
 
         let ticks_per_10_ms = START_COUNT - self.lapic.read_apic_timer_current_count();
 
-        unsafe {
-            LAPIC_TICKS_PER_10_MS.store(ticks_per_10_ms as usize, Ordering::SeqCst);
-        }
+        self.ticks_per_10_ms = ticks_per_10_ms as usize;
 
+        self.lapic.write_apic_register_initcnt(self.ticks_per_10_ms as u32);
         crate::println!("ticks per 10 ms: {:?}", ticks_per_10_ms);
 
         Ok(())
