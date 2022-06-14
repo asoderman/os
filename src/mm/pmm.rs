@@ -483,16 +483,17 @@ mod test {
     #[test_case]
     fn test_request_range() {
         // NOTE: This only tests finding the frame from the stack allocator and not in the regions
-        let test_addr = memory_manager().pmm.request_frame();
-        memory_manager().pmm.release_frame(test_addr.clone());
-        let pre = memory_manager().pmm.find_frame(test_addr);
-        let f = memory_manager().pmm.request_range(test_addr, 1);
-        let post = memory_manager().pmm.find_frame(test_addr);
+        let mut mm_lock = memory_manager();
+        let test_addr = mm_lock.pmm.request_frame();
+        mm_lock.pmm.release_frame(test_addr.clone());
+        let pre = mm_lock.pmm.find_frame(test_addr);
+        let f = mm_lock.pmm.request_range(test_addr, 1);
+        let post = mm_lock.pmm.find_frame(test_addr);
 
         assert!(pre);
         assert!(f.is_some());
         assert!(!post);
 
-        memory_manager().pmm.release_frame(f.unwrap());
+        mm_lock.pmm.release_frame(f.unwrap());
     }
 }
