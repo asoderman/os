@@ -12,8 +12,9 @@ use libkloader::{MemoryMapInfo, MemoryDescriptor};
 use x86_64::structures::paging::frame::{PhysFrame, PhysFrameRange};
 use x86_64::structures::paging::page::Size4KiB;
 
-use super::region::MemRegion;
+use atomic_bitvec::AtomicBitVec;
 
+use super::region::MemRegion;
 
 static mut PHYS_OFFSET: AtomicUsize = AtomicUsize::new(0);
 
@@ -142,6 +143,102 @@ impl PartialEq for PhysicalRegion {
 }
 
 impl Eq for PhysicalRegion {}
+
+#[derive(Debug)]
+pub struct AtomicFrameAllocator {
+    bitmap: AtomicBitVec,
+}
+
+impl AtomicFrameAllocator {
+    pub fn uninit() -> Self {
+        AtomicFrameAllocator {
+            bitmap: AtomicBitVec::new()
+        }
+    }
+
+    pub fn init(&mut self, memory_map: &[MemoryDescriptor], heap_start: VirtAddr, heap_end: VirtAddr, phys_offset: usize) {
+        let page_count: usize = memory_map.iter().map(|d| d.page_count as usize).sum();
+        self.bitmap.resize(page_count, false);
+
+        for descriptor in memory_map {
+            match descriptor.ty {
+                3 | 4 | 7 => {
+                    let start = descriptor.phys_start;
+
+                    for page_num in 0..descriptor.page_count {
+                        let addr = PhysAddr::new(start + (PAGE_SIZE as u64 * page_num));
+                        use super::frame_allocator::FrameAllocator;
+                        self.deallocate_frame(addr);
+                    }
+                }
+
+                _ => ()
+            }
+        }
+
+        let heap_start_phys = PhysAddr::new(heap_start.as_u64() - phys_offset as u64);
+        let heap_end_phys = PhysAddr::new(heap_end.as_u64() - phys_offset as u64);
+
+        for page_num in page_number(heap_start_phys)..page_number(heap_end_phys) {
+            self.mark_frame_available(page_address(page_num))
+        }
+    }
+
+    pub fn free_frames(&self) -> usize {
+        self.bitmap.count_ones()
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.bitmap.len()
+    }
+
+    fn mark_frame_available(&self, addr: PhysAddr) {
+        self.bitmap.as_bitslice().set_aliased(page_number(addr), true);
+    }
+
+    fn mark_frame_used(&self, addr: PhysAddr) {
+        self.bitmap.as_bitslice().set_aliased(page_number(addr), false);
+    }
+
+    pub fn request_frame(&self, addr: PhysAddr) -> Option<PhysAddr> {
+        if self.is_available(addr) {
+            self.mark_frame_used(addr);
+            Some(addr)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_available(&self, addr: PhysAddr) -> bool {
+        self.bitmap.get(page_number(addr)).map(|r| *r).unwrap_or(false)
+    }
+
+    fn take_first_available(&self) -> PhysAddr {
+        let num = self.bitmap.first_one().expect("OOM");
+        let addr = PhysAddr::new((num * PAGE_SIZE) as u64);
+        self.mark_frame_used(addr);
+
+        addr
+    }
+}
+
+fn page_number(addr: PhysAddr) -> usize {
+    addr.as_u64() as usize / PAGE_SIZE
+}
+
+fn page_address(num: usize) -> PhysAddr {
+    PhysAddr::new((num * PAGE_SIZE) as u64)
+}
+
+impl super::frame_allocator::FrameAllocator for AtomicFrameAllocator {
+    fn allocate_frame(&mut self) -> PhysAddr {
+        self.take_first_available()
+    }
+
+    fn deallocate_frame(&mut self, frame: PhysAddr) {
+        self.mark_frame_available(frame);
+    }
+}
 
 #[derive(Debug)]
 struct FrameAllocator {
@@ -408,6 +505,11 @@ pub unsafe fn write_physical_slice<T: Sized + Clone>(addr: PhysAddr, value: &[T]
     core::slice::from_raw_parts_mut(ptr, value.len()).clone_from_slice(value);
 }
 
+pub unsafe fn get_phys_as_mut<'t, T>(addr: PhysAddr) -> Option<&'t mut T> {
+    let ptr = phys_to_virt(addr).as_mut_ptr() as *mut T;
+    ptr.as_mut()
+}
+
 pub(super) fn init_phys_offset(offset: usize) {
     unsafe {
         *PHYS_OFFSET.get_mut() = offset;
@@ -480,20 +582,22 @@ pub fn get_init_heap_section(
 mod test {
     use super::super::*;
 
+    use frame_allocator::FrameAllocator;
+
     #[test_case]
     fn test_request_range() {
         // NOTE: This only tests finding the frame from the stack allocator and not in the regions
         let mut mm_lock = memory_manager();
-        let test_addr = mm_lock.pmm.request_frame();
-        mm_lock.pmm.release_frame(test_addr.clone());
-        let pre = mm_lock.pmm.find_frame(test_addr);
-        let f = mm_lock.pmm.request_range(test_addr, 1);
-        let post = mm_lock.pmm.find_frame(test_addr);
+        let test_addr = mm_lock.pmm.allocate_frame();
+        mm_lock.pmm.deallocate_frame(test_addr.clone());
+        let pre = mm_lock.pmm.is_available(test_addr);
+        let f = mm_lock.pmm.request_frame(test_addr);
+        let post = mm_lock.pmm.is_available(test_addr);
 
         assert!(pre);
         assert!(f.is_some());
         assert!(!post);
 
-        mm_lock.pmm.release_frame(f.unwrap());
+        mm_lock.pmm.deallocate_frame(f.unwrap());
     }
 }

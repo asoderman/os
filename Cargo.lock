@@ -14,6 +14,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-bitvec"
+version = "0.1.1"
+
+[[package]]
 name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -176,6 +180,7 @@ name = "rkernel"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "atomic-bitvec",
  "bitfield",
  "bitflags",
  "either",

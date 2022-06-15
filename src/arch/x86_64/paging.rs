@@ -1,6 +1,7 @@
 use core::{marker::PhantomData, ptr::NonNull};
 
 use crate::mm::frame_allocator::FrameAllocator;
+use crate::mm::get_phys_as_mut;
 
 use alloc::vec::Vec;
 use x86_64::{
@@ -283,17 +284,15 @@ mod test {
     use super::*;
     use super::super::PhysAddr;
 
-    use crate::mm::memory_manager;
-
     /// Test the page table walker by following the address that maps to the start of physical
     /// memory. This is known to be a 2MB huge page mapped by kloader.
     #[test_case]
     fn test_pt_walker() {
         let phys_offset_vaddr = phys_to_virt(PhysAddr::new(0));
         let pml4 = x86_64::registers::control::Cr3::read().0;
-        let mm = memory_manager();
+        //let mm = memory_manager();
         let pt = unsafe {
-            mm.get_phys_as_mut(pml4.start_address()).unwrap()
+            get_phys_as_mut(pml4.start_address()).unwrap()
         };
 
         let mut pt_walker = Mapper::new(phys_offset_vaddr, pt);

@@ -16,10 +16,11 @@ pub use pmm::get_init_heap_section;
 pub use error::MemoryManagerError;
 
 use self::mapping::Mapping;
-use self::pmm::PhysicalMemoryManager;
+use self::pmm::{PhysicalMemoryManager, AtomicFrameAllocator};
 use self::vmm::{VirtualMemoryManager, VirtualMemoryError, VirtualRegion};
+use self::frame_allocator::FrameAllocator;
 pub use self::vmm::get_kernel_context_virt;
-pub use self::pmm::{write_physical, write_physical_slice};
+pub use self::pmm::{write_physical, write_physical_slice, get_phys_as_mut};
 
 use lazy_static::lazy_static;
 
@@ -32,7 +33,7 @@ type Error = MemoryManagerError;
 #[derive(Debug)]
 pub struct MemoryManager {
     vmm: VirtualMemoryManager,
-    pmm: PhysicalMemoryManager
+    pmm: AtomicFrameAllocator
 
 }
 
@@ -40,18 +41,13 @@ impl MemoryManager {
     fn new() -> Self {
         MemoryManager {
             vmm: VirtualMemoryManager::default(),
-            pmm: PhysicalMemoryManager::uninit(),
+            pmm: AtomicFrameAllocator::uninit(),
         }
-    }
-
-    /// Mutably borrow the memory at the provided PhysAddr
-    pub unsafe fn get_phys_as_mut<T>(&self, paddr: PhysAddr) -> Option<&mut T> {
-        self.pmm.get_phys_as_mut(paddr)
     }
 
     /// Identity maps a physical page into the virtual address space if it is available
     pub fn k_identity_map(&mut self, paddr: PhysAddr, size: usize) -> Result<(), Error> {
-        let frame = self.pmm.request_low_memory(paddr, size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
+        let frame = self.pmm.request_frame(paddr).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
         assert_eq!(frame, paddr);
         let mapping = mapping::Mapping::new_identity(frame);
         self.vmm.insert_and_map(mapping, &mut self.pmm)?;
@@ -149,12 +145,12 @@ mod test {
         let mut mm = MM.lock();
 
         let starting_frames_in_alloc = mm.pmm.frame_count();
-        let frame = mm.pmm.request_frame();
-        let frame2 = mm.pmm.request_frame();
+        let frame = mm.pmm.allocate_frame();
+        let frame2 = mm.pmm.allocate_frame();
         let frame_count_after_alloc = mm.pmm.frame_count();
 
-        mm.pmm.release_frame(frame);
-        mm.pmm.release_frame(frame2);
+        mm.pmm.deallocate_frame(frame);
+        mm.pmm.deallocate_frame(frame2);
         let frame_count_after_free = mm.pmm.frame_count();
 
         assert_ne!(frame, frame2);
