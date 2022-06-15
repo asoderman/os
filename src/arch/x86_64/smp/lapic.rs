@@ -133,7 +133,7 @@ impl Lapic {
             let base_phys = PhysAddr::new(*LAPIC_BASE.get_unchecked() as u64);
             if base_phys.as_u64() == u64::max_value() { panic!("LAPIC_BASE not set") }
             let vaddr = memory_manager().kmap_mmio_anywhere(base_phys, 1).expect("Could not map lapic");
-            crate::println!("Mapping lapic to {:?}", vaddr);
+            //crate::println!("Mapping lapic to {:?}", vaddr);
             Self {
                 vaddr,
                 x2: false,

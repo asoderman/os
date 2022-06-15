@@ -2,6 +2,7 @@ use core::ptr::addr_of;
 use core::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 
 use x86_64::registers::model_specific::Msr;
+use x86_64::structures::tss::TaskStateSegment;
 
 use crate::arch::PAGE_SIZE;
 
@@ -12,8 +13,8 @@ static mut TLS_INIT: AtomicBool = AtomicBool::new(false);
 
 const FS_BASE_MSR: u32 = 0xC0000100;
 // TODO: Use gsbase for kernel thread_locals once supported
-#[allow(dead_code)]
 const GS_BASE_MSR: u32 = 0xC0000101;
+const KERNEL_GS_BASE_MSR: u32 = 0xC0000102;
 
 /// Writes to the fs_base MSR
 unsafe fn set_fs_base(addr: usize) {
@@ -21,9 +22,25 @@ unsafe fn set_fs_base(addr: usize) {
     Msr::new(FS_BASE_MSR).write(addr as u64);
 }
 
-#[allow(dead_code)]
-unsafe fn set_gs_base(_addr: usize) {
-    unimplemented!()
+unsafe fn set_kernel_gs_base(addr: usize) {
+    Msr::new(GS_BASE_MSR).write(addr as u64);
+}
+
+#[repr(C)]
+pub struct ProcessorControlBlock {
+    pub tls_self_ptr: usize,
+    pub tmp_user_rsp: usize,
+    pub tss: TaskStateSegment
+}
+
+impl ProcessorControlBlock {
+    /// Gets the thread local ProcessorControlBlock
+    pub fn get() -> &'static mut Self {
+        unsafe {
+            let fs = Msr::new(FS_BASE_MSR).read();
+            (fs as *mut Self).as_mut().expect("Tried to access ProcessorControlBlock before thread local init")
+        }
+    }
 }
 
 // Exposed in the linker script
@@ -43,8 +60,8 @@ pub fn init_thread_local(lapic_id: usize) {
         init_tcb(super::CORES.load(Ordering::SeqCst));
 
         // get tls base for our lapic id
-        let addr = tls_base(lapic_id) as *mut u64;
-        set_fs_base(addr as usize);
+        set_fs_base(tls_base(lapic_id));
+        set_kernel_gs_base(tls_base(lapic_id));
     }
 }
 
@@ -67,7 +84,7 @@ fn init_tcb(cores: usize) {
         };
         TLS_SIZE.store(tls_size, Ordering::SeqCst);
 
-        assert!(tls_size < PAGE_SIZE, "TODO: Implement TLS for > PAGE_SIZE");
+        assert!(tls_size * cores < PAGE_SIZE, "TODO: Implement TLS for > PAGE_SIZE");
 
         // Create a slice of the data we need to copy
         let tls_image = core::slice::from_raw_parts(addr_of!(__tdata_start), tls_image_size);
@@ -79,7 +96,7 @@ fn init_tcb(cores: usize) {
         // start at 1 since we pulled out the first iter
         for c in 1..=cores {
             // Compute next base and next data start ptr
-            let next_base = start.add(c * (core::mem::size_of::<usize>() + tls_size));
+            let next_base = start.add(c * (core::mem::size_of::<ProcessorControlBlock>() + tls_size));
             // Subtract the aligned tls size from the base. This is how the cpu computes this via
             // negative offsets
             let next_data = next_base.sub(tls_size);
@@ -99,7 +116,7 @@ fn init_tcb(cores: usize) {
 fn tls_base(index: usize) -> usize {
     unsafe {
         let first = BSP_TLS_BASE.load(Ordering::SeqCst);
-        let offset = (TLS_SIZE.load(Ordering::SeqCst) + core::mem::size_of::<usize>()) * index;
+        let offset = (TLS_SIZE.load(Ordering::SeqCst) + core::mem::size_of::<ProcessorControlBlock>()) * index;
         first + offset
     }
 }

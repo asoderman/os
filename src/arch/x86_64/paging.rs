@@ -273,6 +273,10 @@ impl<'a> Mapper<'a> {
     }
 }
 
+pub fn get_cr3() -> PhysAddr {
+    x86_64::registers::control::Cr3::read().0.start_address()
+}
+
 #[cfg(test)]
 mod test {
 

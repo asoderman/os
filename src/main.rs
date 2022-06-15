@@ -9,6 +9,10 @@
 #![feature(drain_filter)]
 #![feature(bool_to_option)]
 #![feature(thread_local)]
+#![feature(asm_const)]
+#![feature(asm_sym)]
+#![feature(const_ptr_offset_from)]
+#![feature(naked_functions)]
 #![test_runner(test_runner)]
 
 #![reexport_test_harness_main = "test_main"]
@@ -16,9 +20,11 @@
 
 extern crate alloc;
 
+#[macro_use]
+mod util;
+
 mod acpi;
 mod arch;
-#[macro_use]
 mod cpu;
 mod dev;
 mod error;
@@ -26,12 +32,13 @@ mod heap;
 mod info;
 mod interrupt;
 mod mm;
+mod proc;
 mod qemu;
 mod stack;
+mod syscall;
 #[cfg(test)]
 mod test;
-#[macro_use]
-mod util;
+mod time;
 
 use core::panic::PanicInfo;
 
@@ -91,14 +98,37 @@ fn main(bootinfo: &KernelInfo) {
     #[cfg(test)]
     test_main();
 
-    todo!("Set up scheduler");
-    loop {}
+    proc::process_list_mut().spawn(idle);
+    loop {
+        syscall::yield_();
+    }
+}
+
+pub fn idle() {
+    println!("In the idle fn");
+    proc::process_list_mut().spawn(|| {
+
+        proc::process_list_mut().spawn(|| {
+            println!("Hello world! I am {}! Now I will die!", proc::pid());
+            proc::exit(0)
+        });
+
+        println!("New Process {}\n{}", proc::pid(), time::DateTime::now());
+        loop {
+            println!("[{}] Hello from pid: {}, core: {}", time::DateTime::now(), proc::pid(), arch::x86_64::apic_id());
+            syscall::sleep(2);
+        }
+    });
+    loop {
+        println!("Hello from pid: {}, core: {}", proc::pid(), arch::x86_64::apic_id());
+        syscall::sleep(5);
+    }
 }
 
 pub fn ap_main() {
     println!("ap main reached. waiting for scheduler");
     loop {
-        // Wait for scheduler
+        syscall::yield_();
     }
 }
 

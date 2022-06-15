@@ -2,17 +2,19 @@ use x86_64::structures::idt::InterruptStackFrame;
 
 use crate::{println, arch::x86_64::paging::Mapper, mm::get_kernel_context_virt};
 
-/// x86_64 interrupt numbers
-/// TODO: Implement arm conversion
-#[repr(usize)]
-enum Interrupt {
-    DivideError = 0,
-    Debug = 1,
-    Breakpoint = 3,
-}
+mod handlers;
+pub mod number;
 
 fn no_op_isr(frame: InterruptStackFrame, index: u8, error_code: Option<u64>) {
     println!("Dummy ISR {:#X} e: {:#X?}: \n {:#?}", index, error_code, frame);
+}
+
+pub fn eoi() {
+    #[cfg(target_arch="x86_64")]
+    {
+        // TODO: this maps the lapic on every call. FIX THIS!!!
+        crate::arch::x86_64::smp::lapic::Lapic::new().eoi();
+    }
 }
 
 fn page_fault_err(frame: InterruptStackFrame, _index: u8, error_code: Option<u64>) {
@@ -45,10 +47,24 @@ pub fn disable_interrupts() -> bool {
     out
 }
 
+pub fn restore_interrupts(should: bool) {
+    if should {
+        enable_interrupts()
+    }
+}
+
 pub fn without_interrupts<F: FnOnce()>(f: F) {
     let was = disable_interrupts();
     f();
-    if was { enable_interrupts(); }
+    restore_interrupts(was);
+}
+
+/// Halt the CPU. Waits for the next interrupt
+pub fn enable_and_halt() {
+    enable_interrupts();
+    unsafe {
+        core::arch::asm!("hlt");
+    }
 }
 
 pub fn init() -> Result<(), ()> {
@@ -57,12 +73,10 @@ pub fn init() -> Result<(), ()> {
         let idt = crate::arch::x86_64::idt::get_idt_mut().ok_or(())?;
 
         x86_64::set_general_handler!(idt, no_op_isr);
-        x86_64::set_general_handler!(idt, page_fault_err, 0xe);
         println!("Noop handlers installed");
-    }
 
-    println!("Enabling irq");
-    enable_interrupts();
-    println!("irq enabled");
+        handlers::install_handlers();
+    }
     Ok(())
 }
+

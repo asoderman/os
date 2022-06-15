@@ -157,6 +157,12 @@ fn apic_list_cores(info: &ProcessorInfo) {
     CORES.store(core_count, Ordering::SeqCst);
 }
 
+pub(super) fn init_smp_ap(lapic_id: usize) {
+    thread_local::init_thread_local(lapic_id);
+    CpuLocals::init(lapic_id);
+    lapic::Lapic::new().initialize().expect("Failed to initialize LAPIC for ap!");
+}
+
 /// Gets the lapic for the current core
 fn lapic() -> Lapic {
     Lapic::new()

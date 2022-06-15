@@ -3,18 +3,25 @@ pub const PAGE_SIZE: usize = 4096;
 use libkloader::KernelInfo;
 pub use x86_64::{PhysAddr, VirtAddr};
 
+pub mod context;
 pub mod cpu;
 pub mod idt;
+#[macro_use]
+pub mod interrupt;
 mod gdt;
 mod lapic_timer;
 pub mod paging;
 mod pic;
 mod pit;
 pub mod smp;
+mod syscall;
+pub mod timers;
+
+pub use gdt::set_tss_rsp0;
 
 /// Initialize as many platform components as we can here.
 pub fn platform_init(bootinfo: &KernelInfo) {
-    gdt::init_gdt();
+    gdt::init_base_gdt();
     unsafe {
         gdt::load_kernel_gdt();
     }
@@ -22,6 +29,12 @@ pub fn platform_init(bootinfo: &KernelInfo) {
     crate::println!("Empty IDT initialized");
 
     smp::init_smp(bootinfo).expect("Could not initialize SMP");
+
+    unsafe {
+        gdt::load_per_cpu_gdt();
+    }
+
+    syscall::init_syscall();
 }
 
 /// Initialize as many platform components as we can here. Platform init but for ap's. Shared
@@ -31,9 +44,11 @@ pub(super) fn ap_init(lapic_id: usize) {
         gdt::load_kernel_gdt();
     }
     idt::init_idt().expect("Could not load IDT on ap");
-    smp::thread_local::init_thread_local(lapic_id);
-    smp::CpuLocals::init(lapic_id);
-    smp::lapic::Lapic::new().initialize().expect("Failed to initialize LAPIC for ap!");
+    smp::init_smp_ap(lapic_id);
+    unsafe {
+        gdt::load_per_cpu_gdt();
+    }
+    syscall::init_syscall();
 }
 
 /// Returns the apic id of the core the calls this

@@ -3,6 +3,8 @@ pub mod x86_64;
 pub use self::x86_64::{VirtAddr, PhysAddr};
 pub use self::x86_64::PAGE_SIZE;
 
+pub use self::x86_64::context::{Context, switch};
+
 #[macro_export]
 macro_rules! interrupt {
     ($num:expr, $isr:ident) => {
