@@ -12,7 +12,7 @@ use libkloader::{MemoryMapInfo, MemoryDescriptor};
 use x86_64::structures::paging::frame::{PhysFrame, PhysFrameRange};
 use x86_64::structures::paging::page::Size4KiB;
 
-use atomic_bitvec::AtomicBitVec;
+use crate::common::bitvec::BitVec;
 
 use super::region::MemRegion;
 
@@ -146,19 +146,19 @@ impl Eq for PhysicalRegion {}
 
 #[derive(Debug)]
 pub struct AtomicFrameAllocator {
-    bitmap: AtomicBitVec,
+    bitmap: BitVec,
 }
 
 impl AtomicFrameAllocator {
     pub fn uninit() -> Self {
         AtomicFrameAllocator {
-            bitmap: AtomicBitVec::new()
+            bitmap: BitVec::new()
         }
     }
 
     pub fn init(&mut self, memory_map: &[MemoryDescriptor], heap_start: VirtAddr, heap_end: VirtAddr, phys_offset: usize) {
         let page_count: usize = memory_map.iter().map(|d| d.page_count as usize).sum();
-        self.bitmap.resize(page_count, false);
+        self.bitmap.resize(page_count);
 
         for descriptor in memory_map {
             match descriptor.ty {
@@ -192,15 +192,15 @@ impl AtomicFrameAllocator {
         self.bitmap.len()
     }
 
-    fn mark_frame_available(&self, addr: PhysAddr) {
-        self.bitmap.as_bitslice().set_aliased(page_number(addr), true);
+    fn mark_frame_available(&mut self, addr: PhysAddr) {
+        self.bitmap.set(page_number(addr), true);
     }
 
-    fn mark_frame_used(&self, addr: PhysAddr) {
-        self.bitmap.as_bitslice().set_aliased(page_number(addr), false);
+    fn mark_frame_used(&mut self, addr: PhysAddr) {
+        self.bitmap.set(page_number(addr), false);
     }
 
-    pub fn request_frame(&self, addr: PhysAddr) -> Option<PhysAddr> {
+    pub fn request_frame(&mut self, addr: PhysAddr) -> Option<PhysAddr> {
         if self.is_available(addr) {
             self.mark_frame_used(addr);
             Some(addr)
@@ -213,7 +213,7 @@ impl AtomicFrameAllocator {
         self.bitmap.get(page_number(addr)).map(|r| *r).unwrap_or(false)
     }
 
-    fn take_first_available(&self) -> PhysAddr {
+    fn take_first_available(&mut self) -> PhysAddr {
         let num = self.bitmap.first_one().expect("OOM");
         let addr = PhysAddr::new((num * PAGE_SIZE) as u64);
         self.mark_frame_used(addr);

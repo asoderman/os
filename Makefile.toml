@@ -142,6 +142,20 @@ args= [ "-bios",
         "--no-reboot"
       ]
 
+[tasks.qemu_text_smp]
+ignore_errors = true
+command = "qemu-system-x86_64"
+args= [ "-bios",
+        "/usr/share/ovmf/OVMF.fd",
+        "-drive",
+        "file=fat:rw:${output_dir},format=raw",
+        "-nographic",
+        "-no-shutdown",
+        "--no-reboot",
+        "-smp",
+        "${CPU_CORES}"
+      ]
+
 [tasks.qemu_test]
 dependencies = ["update_kernel"]
 command = "qemu-system-x86_64"

@@ -26,6 +26,7 @@ mod util;
 mod acpi;
 mod arch;
 mod cpu;
+mod common;
 mod dev;
 mod error;
 mod heap;
