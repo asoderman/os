@@ -5,10 +5,14 @@ bootloader_cargo_config = "../kloader/.cargo/config.toml"
 bootloader_build_dir = "bootloader"
 bootloader_src_dir = "../kloader/"
 qemu_success_value = 33
-CPU_CORES=4
+CPU_CORES=1
+#linux
+#OVMF_DIR="/usr/share/ovmf/OVMF.fd"
+#macos
+OVMF_DIR="/usr/local/ovmf/OVMF.fd/OVMF_CODE-pure-efi.fd"
 # Cargo make does not play nice with non 0 exit codes 
 # so we invoke the test setup directly
-qemu_test_command = "qemu-system-x86_64 -bios /usr/share/ovmf/OVMF.fd -drive file=fat:rw:${output_dir},format=raw -nographic -d int -D log.txt --no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 -smp ${CPU_CORES} -rtc base=localtime"
+qemu_test_command = "qemu-system-x86_64 -bios ${OVMF_DIR} -drive file=fat:rw:${output_dir},format=raw -nographic -d int -D log.txt --no-reboot -device isa-debug-exit,iobase=0xf4,iosize=0x04 -smp ${CPU_CORES} -rtc base=localtime"
 
 [tasks.addr2line]
 command = "addr2line"
@@ -43,6 +47,11 @@ args = ["-rf", "${output_dir}"]
 dependencies = ["clean"]
 command = "./build_bootloader.sh"
 args = ["${bootloader_src_dir}"]
+
+[tasks.mkdir]
+private = true
+command = "mkdir"
+args = ["-p", "${output_dir}/kernel"]
 
 [tasks.update_kernel]
 command = "cp"
@@ -85,7 +94,7 @@ ignore_errors = true
 dependencies = ["update_kernel"]
 command = "qemu-system-x86_64"
 args= [ "-bios",
-        "/usr/share/ovmf/OVMF.fd",
+        "${OVMF_DIR}",
         "-drive",
         "file=fat:rw:${output_dir},format=raw",
         "-serial",
@@ -134,7 +143,7 @@ args= [ "-bios",
 ignore_errors = true
 command = "qemu-system-x86_64"
 args= [ "-bios",
-        "/usr/share/ovmf/OVMF.fd",
+        "${OVMF_DIR}",
         "-drive",
         "file=fat:rw:${output_dir},format=raw",
         "-nographic",
@@ -154,3 +163,14 @@ args= [ "-bios",
         "-device",
         "isa-debug-exit,iobase=0xf4,iosize=0x04"
       ]
+
+[tasks.install_ovmf]
+script = '''
+cd ~/Downloads
+# Extract the .rpm
+# Ensure filename is correct to yours
+tar -xf edk2.git-ovmf-x64-0-20211216.193.g92ab049719.noarch.rpm
+# Next rename and move the file into a safe place
+sudo mkdir -p ${OVMF_DIR}
+sudo cp -r usr/share/edk2.git/ovmf-x64/OVMF_CODE-pure-efi.fd ${OVMF_DIR}
+'''

@@ -178,7 +178,6 @@ dependencies = [
  "acpi",
  "bitfield",
  "bitflags",
- "either",
  "itertools",
  "lazy_static",
  "libkloader",
@@ -282,6 +281,7 @@ checksum = "e3ca98349dda8a60ae74e04fd90c7fb4d6a4fbe01e6d3be095478aa0b76f6c0c"
 [[package]]
 name = "x86_64"
 version = "0.14.9"
+source = "git+https://github.com/asoderman/x86_64?branch=interrupt-macro#9db552f25af29bd550a2bc0be2f2825e5226c7a4"
 dependencies = [
  "bit_field",
  "bitflags",
