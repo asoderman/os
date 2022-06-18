@@ -194,7 +194,7 @@ impl Lapic {
     /// Read the lapic id register
     pub fn id(&self) -> u32 {
         unsafe {
-            core::ptr::read((self.vaddr.as_u64() as usize + ID_REGISTER) as *const u32)
+            core::ptr::read_volatile((self.vaddr.as_u64() as usize + ID_REGISTER) as *const u32)
         }
     }
 

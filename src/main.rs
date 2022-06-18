@@ -59,6 +59,7 @@ fn static_assert(b: bool, msg: &str) {
 extern "C" fn start(bootinfo: *const KernelInfo) {
     let info;
     unsafe {
+        static_assert(bootinfo as usize != 0, "Bootinfo nullptr!");
         stack::set_stack_start((*bootinfo).rsp);
         info = bootinfo.as_ref().expect("Nullptr dereferenced for bootinfo");
     }
