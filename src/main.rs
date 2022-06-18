@@ -135,7 +135,30 @@ pub fn ap_main() {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    // Print KERNEL PANIC before even attempting to get core num so we know it's a panic even if we
+    // fault in try_apic_id
+    print!("KERNEL PANIC ");
+    let core = arch::x86_64::try_apic_id();
+    println!("on core {:?}: {}", core, info);
+
+    #[cfg(test)]
+    {
+        use qemu::{exit_qemu, QemuExitCode};
+
+        println!("");
+        println!("Unit test failed!");
+        println!("{}", info);
+
+        exit_qemu(QemuExitCode::Failed);
+    }
+    unsafe {
+        core::arch::asm!("
+        cli
+        hlt
+        ", options(noreturn))
+    }
 }
+
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn test::Test]) {

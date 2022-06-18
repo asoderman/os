@@ -47,8 +47,15 @@ impl CpuLocals {
     }
 
     pub fn try_get<'local>() -> Option<&'local Self> {
-        unsafe {
-            CPU_LOCALS.is_init.then_some(&CPU_LOCALS)
+        // TODO: gsbase!
+        let tl_base = x86_64::registers::model_specific::FsBase::read();
+
+        if tl_base == super::VirtAddr::new(0u64) {
+            None
+        } else {
+            unsafe {
+                CPU_LOCALS.is_init.then_some(&CPU_LOCALS)
+            }
         }
     }
 }
