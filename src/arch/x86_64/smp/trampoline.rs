@@ -112,14 +112,16 @@ impl Trampoline {
 }
 
 pub(super) fn wait_for_core(lapic_id: usize) {
-    while !SMP_CORES_READY.get(lapic_id).expect("Invalid lapic id").load(Ordering::SeqCst) {}
+    while !SMP_CORES_READY.get(lapic_id).expect("Invalid lapic id").load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
 }
 
 /// The rust entry point for ap's
 pub extern "C" fn ap_entry(lapic_id: usize) {
     crate::println!("ap_entry lapic_id: {}", lapic_id);
     crate::arch::x86_64::ap_init(lapic_id);
-    SMP_CORES_READY[super::this_core().local_apic_id as usize].store(true, Ordering::SeqCst);
+    SMP_CORES_READY[super::this_core().local_apic_id as usize].store(true, Ordering::Release);
 
     for (i, core) in SMP_CORES_READY.iter().enumerate() {
         crate::println!("core {} ready:{:?}", i, core);

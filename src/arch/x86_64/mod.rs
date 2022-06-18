@@ -57,3 +57,7 @@ pub fn apic_id() -> u32 {
         smp::lapic::Lapic::new().id()
     })
 }
+
+pub fn try_apic_id() -> Option<u32> {
+    smp::CpuLocals::try_get().map(|local| local.lapic_id as u32)
+}

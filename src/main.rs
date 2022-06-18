@@ -60,6 +60,7 @@ fn static_assert(b: bool, msg: &str) {
 extern "C" fn start(bootinfo: *const KernelInfo) {
     let info;
     unsafe {
+        static_assert(bootinfo as usize != 0, "Bootinfo nullptr!");
         stack::set_stack_start((*bootinfo).rsp);
         info = bootinfo.as_ref().expect("Nullptr dereferenced for bootinfo");
     }
@@ -135,10 +136,30 @@ pub fn ap_main() {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    let core = arch::x86_64::apic_id();
-    println!("KERNEL PANIC on core {}: {}", core, info);
-    loop {}
+    // Print KERNEL PANIC before even attempting to get core num so we know it's a panic even if we
+    // fault in try_apic_id
+    print!("KERNEL PANIC ");
+    let core = arch::x86_64::try_apic_id();
+    println!("on core {:?}: {}", core, info);
+
+    #[cfg(test)]
+    {
+        use qemu::{exit_qemu, QemuExitCode};
+
+        println!("");
+        println!("Unit test failed!");
+        println!("{}", info);
+
+        exit_qemu(QemuExitCode::Failed);
+    }
+    unsafe {
+        core::arch::asm!("
+        cli
+        hlt
+        ", options(noreturn))
+    }
 }
+
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn test::Test]) {
