@@ -9,8 +9,4 @@ build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
 
 [target.x86_64-bare]
-runner = "cargo make runner"
-
-## TODO: target.triple takes precedence so cargo test does not work properly
-[target.'cfg(all(test, target_arch="x86_64"))']
-runner = "cargo make qemu_test"
+runner = "just update_and_run"

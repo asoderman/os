@@ -135,9 +135,6 @@ pub fn ap_main() {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    let core = arch::x86_64::apic_id();
-    println!("KERNEL PANIC on core {}: {}", core, info);
-    loop {}
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ use crate::{println, print};
 pub trait Test {
     fn run(&self) -> ();
 }
+
 #[cfg(test)]
 impl<T> Test for T
 where
@@ -16,7 +17,11 @@ where
     }
 }
 
-#[test_case]
-fn example() {
-    assert!(true);
+#[cfg(test)]
+mod test {
+
+    #[test_case]
+    fn example() {
+        assert!(true);
+    }
 }
