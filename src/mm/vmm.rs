@@ -2,7 +2,6 @@ use core::ptr::NonNull;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering;
 use alloc::collections::BTreeSet;
-use alloc::vec::Vec;
 use x86_64::PhysAddr;
 use x86_64::structures::paging::PageTable;
 use crate::arch::x86_64::VirtAddr;

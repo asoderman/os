@@ -16,9 +16,8 @@ pub use pmm::get_init_heap_section;
 pub use error::MemoryManagerError;
 
 use self::mapping::Mapping;
-use self::pmm::{PhysicalMemoryManager, AtomicFrameAllocator};
+use self::pmm::BitMapFrameAllocator;
 use self::vmm::{VirtualMemoryManager, VirtualMemoryError, VirtualRegion};
-use self::frame_allocator::FrameAllocator;
 pub use self::vmm::get_kernel_context_virt;
 pub use self::pmm::{write_physical, write_physical_slice, get_phys_as_mut};
 
@@ -33,7 +32,7 @@ type Error = MemoryManagerError;
 #[derive(Debug)]
 pub struct MemoryManager {
     vmm: VirtualMemoryManager,
-    pmm: AtomicFrameAllocator
+    pmm: BitMapFrameAllocator
 
 }
 
@@ -41,13 +40,13 @@ impl MemoryManager {
     fn new() -> Self {
         MemoryManager {
             vmm: VirtualMemoryManager::default(),
-            pmm: AtomicFrameAllocator::uninit(),
+            pmm: BitMapFrameAllocator::uninit(),
         }
     }
 
     /// Identity maps a physical page into the virtual address space if it is available
     pub fn k_identity_map(&mut self, paddr: PhysAddr, size: usize) -> Result<(), Error> {
-        let frame = self.pmm.request_frame(paddr).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
+        let frame = self.pmm.request_frame(paddr)?;
         assert_eq!(frame, paddr);
         let mapping = mapping::Mapping::new_identity(frame);
         self.vmm.insert_and_map(mapping, &mut self.pmm)?;
@@ -139,31 +138,25 @@ mod test {
     use crate::arch::PAGE_SIZE;
     use crate::arch::x86_64::paging::Mapper;
 
+    use super::frame_allocator::FrameAllocator;
+
     #[test_case]
     fn test_pmm_alloc_and_free() {
         // Take lock for duration of test
         let mut mm = MM.lock();
 
-        let starting_frames_in_alloc = mm.pmm.frame_count();
+        let starting_frame_count = mm.pmm.free_frames();
         let frame = mm.pmm.allocate_frame();
         let frame2 = mm.pmm.allocate_frame();
-        let frame_count_after_alloc = mm.pmm.frame_count();
+        let frame_count_after_alloc = mm.pmm.free_frames();
 
         mm.pmm.deallocate_frame(frame);
         mm.pmm.deallocate_frame(frame2);
-        let frame_count_after_free = mm.pmm.frame_count();
+        let frame_count_after_free = mm.pmm.free_frames();
 
         assert_ne!(frame, frame2);
-        // TODO: Split these into two seperate test cases 
-        if starting_frames_in_alloc > 1 {
-            // If a fill does not occur
-            assert_eq!(starting_frames_in_alloc - 2, frame_count_after_alloc);
-            assert_eq!(starting_frames_in_alloc, frame_count_after_free);
-        } else {
-            // Fill occured
-            assert!(starting_frames_in_alloc <= frame_count_after_alloc);
-            assert_eq!(frame_count_after_alloc + 2, frame_count_after_free);
-        }
+        assert_ne!(starting_frame_count, frame_count_after_alloc);
+        assert_eq!(starting_frame_count, frame_count_after_free);
     }
 
     /// The VMM should not allow caller to reserve a region in use.
