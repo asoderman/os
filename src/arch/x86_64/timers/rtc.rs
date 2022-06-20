@@ -25,8 +25,8 @@ impl Rtc {
             let time;
             'update_loop: loop {
                 if !update_in_progress(Self::status_a()) {
-                    let t = Self::read_date_time();
-                    if t == Self::read_date_time() && !update_in_progress(Self::status_a()) {
+                    let t = Self::read_date_time(false);
+                    if t == Self::read_date_time(false) && !update_in_progress(Self::status_a()) {
                         time = t;
                         break 'update_loop;
                     }
@@ -45,7 +45,7 @@ impl Rtc {
     }
 
     /// Perform a raw RTC read
-    fn read_date_time() -> DateTime {
+    fn read_date_time(as_12hour: bool) -> DateTime {
         let seconds;
         let minutes;
         let hours;
@@ -83,8 +83,8 @@ impl Rtc {
 
         }
 
-        if is_24hr(Self::status_b()) {
-            todo!("Handle 24 hour time!")
+        if is_24hr(Self::status_b()) && as_12hour {
+            todo!("Handle 24 hour time conversion!")
         }
 
         let time = Time {
