@@ -108,9 +108,9 @@ pub enum SmpError {
 }
 
 /// Initializes the SMP subsystem
-pub fn init_smp(bootinfo: &KernelInfo) -> Result<(), SmpError> {
+pub fn init_smp() -> Result<(), SmpError> {
     crate::println!("Enabling SMP");
-    let tables = acpi::acpi_tables(bootinfo);
+    let tables = acpi::acpi_tables();
     let info = acpi::platform_info(tables);
 
     match info.interrupt_model {

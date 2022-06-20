@@ -1,13 +1,12 @@
 mod error;
 pub mod frame_allocator;
 mod mapping;
-pub mod memory;
 mod pmm;
 mod region;
 mod vmm;
 
 use crate::arch::{PhysAddr, VirtAddr};
-use libkloader::KernelInfo;
+use crate::env::memory_layout;
 use spin::{Mutex, MutexGuard};
 use vmm::init_vmm;
 
@@ -17,8 +16,8 @@ pub use error::MemoryManagerError;
 
 use self::mapping::Mapping;
 use self::pmm::BitMapFrameAllocator;
-use self::vmm::{VirtualMemoryManager, VirtualMemoryError, VirtualRegion};
-pub use self::vmm::get_kernel_context_virt;
+use self::vmm::{VirtualMemoryManager, VirtualMemoryError};
+pub use self::vmm::{get_kernel_context_virt, VirtualRegion};
 pub use self::pmm::{write_physical, write_physical_slice, get_phys_as_mut};
 
 use lazy_static::lazy_static;
@@ -89,15 +88,15 @@ impl MemoryManager {
     }
 
     pub unsafe fn kmap_mmio_anywhere(&mut self, paddr: PhysAddr, size: usize) -> Result<VirtAddr, MemoryManagerError> {
-        let region = self.vmm.first_available_addr_above(memory::mmio_area_start(), size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
+        let region = self.vmm.first_available_addr_above(vmm::mmio_area_start(), size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
         self.kmap_mmio(paddr, region.start, size)?;
         Ok(region.start)
     }
 
-    pub fn init_pmm(&mut self, heap_range: (VirtAddr, VirtAddr), bootinfo: &KernelInfo) {
-        pmm::init_phys_offset(bootinfo.phys_offset as usize);
-        let mem_map = bootinfo.mem_map_info.get_memory_map();
-        self.pmm.init(mem_map, heap_range.0, heap_range.1, bootinfo.phys_offset as usize);
+    pub fn init_pmm(&mut self, heap_range: (VirtAddr, VirtAddr)) {
+        pmm::init_phys_offset(memory_layout().phys_memory_start.as_u64() as usize);
+        let mem_map = &crate::env::env().memory_map;
+        self.pmm.init(mem_map, heap_range.0, heap_range.1);
     }
 }
 
@@ -106,8 +105,8 @@ pub fn memory_manager() -> MutexGuard<'static, MemoryManager> {
     MM.lock()
 }
 
-pub fn init(heap_range: (VirtAddr, VirtAddr), bootinfo: &KernelInfo) {
-    MM.lock().init_pmm(heap_range, bootinfo);
+pub fn init(heap_range: (VirtAddr, VirtAddr)) {
+    MM.lock().init_pmm(heap_range);
     init_vmm();
 }
 

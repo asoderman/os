@@ -1,6 +1,5 @@
 pub const PAGE_SIZE: usize = 4096;
 
-use libkloader::KernelInfo;
 pub use x86_64::{PhysAddr, VirtAddr};
 
 pub mod context;
@@ -20,7 +19,7 @@ pub mod timers;
 pub use gdt::set_tss_rsp0;
 
 /// Initialize as many platform components as we can here.
-pub fn platform_init(bootinfo: &KernelInfo) {
+pub fn platform_init() {
     gdt::init_base_gdt();
     unsafe {
         gdt::load_kernel_gdt();
@@ -28,7 +27,7 @@ pub fn platform_init(bootinfo: &KernelInfo) {
     idt::init_idt().expect("Could not initialize IDT");
     crate::println!("Empty IDT initialized");
 
-    smp::init_smp(bootinfo).expect("Could not initialize SMP");
+    smp::init_smp().expect("Could not initialize SMP");
 
     unsafe {
         gdt::load_per_cpu_gdt();

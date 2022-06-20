@@ -6,11 +6,11 @@ use x86_64::PhysAddr;
 use x86_64::structures::paging::PageTable;
 use crate::arch::x86_64::VirtAddr;
 use crate::arch::PAGE_SIZE;
+use crate::env::memory_layout;
 use core::fmt::Debug;
 use super::frame_allocator::FrameAllocator;
 use super::mapping::Mapping;
 use super::mapping::MappingType;
-use super::memory::memory_layout;
 use super::pmm::phys_to_virt;
 use super::region::MemRegion;
 
@@ -210,6 +210,12 @@ pub fn init_vmm() {
     super::MM.lock().vmm.insert_mapping(kernel_stack).unwrap();
     super::MM.lock().vmm.insert_mapping(kernel_phys).unwrap();
 
+}
+
+/// The start of the MMIO address space comes after the higher half physical memory range
+pub fn mmio_area_start() -> VirtAddr {
+    // Align to 2mb since we use huge frames
+    (memory_layout().phys_memory_start + ((memory_layout().phys_memory_size + 1) * PAGE_SIZE as u64)).align_up(0x1000000u64)
 }
 
 // TODO: doesnt need to be pub should be pub(super)

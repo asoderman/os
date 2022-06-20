@@ -37,7 +37,7 @@ impl BitMapFrameAllocator {
         }
     }
 
-    pub fn init(&mut self, memory_map: &[MemoryDescriptor], heap_start: VirtAddr, heap_end: VirtAddr, phys_offset: usize) {
+    pub fn init(&mut self, memory_map: &[MemoryDescriptor], heap_start: VirtAddr, heap_end: VirtAddr) {
         let page_count: usize = memory_map.iter().map(|d| d.page_count as usize).sum();
         self.bitmap.resize(page_count);
 
@@ -55,8 +55,8 @@ impl BitMapFrameAllocator {
             }
         }
 
-        let heap_start_phys = PhysAddr::new(heap_start.as_u64() - phys_offset as u64);
-        let heap_end_phys = PhysAddr::new(heap_end.as_u64() - phys_offset as u64);
+        let heap_start_phys = PhysAddr::new(heap_start.as_u64() - PHYS_OFFSET.get().cloned().unwrap() as u64);
+        let heap_end_phys = PhysAddr::new(heap_end.as_u64() - PHYS_OFFSET.get().cloned().unwrap() as u64);
 
         for page_num in page_number(heap_start_phys)..page_number(heap_end_phys) {
             self.mark_frame_available(page_address(page_num))

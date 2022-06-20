@@ -4,7 +4,7 @@ use acpi::{AcpiHandler, PhysicalMapping, AcpiTables, PlatformInfo};
 use libkloader::KernelInfo;
 use x86_64::{align_up, align_down};
 
-use crate::mm::{memory_manager};
+use crate::mm::memory_manager;
 
 use crate::arch::{PhysAddr, VirtAddr, PAGE_SIZE};
 
@@ -31,18 +31,13 @@ impl AcpiHandler for AcpiMapper {
     }
 }
 
-pub fn acpi_tables(bootinfo: &KernelInfo) -> AcpiTables<AcpiMapper> {
+pub fn acpi_tables() -> AcpiTables<AcpiMapper> {
+    let rsdp_base = crate::env::env().rsdp_base;
     unsafe {
-        AcpiTables::from_rsdp(AcpiMapper(0), bootinfo.acpi_info.rsdp_base as usize).unwrap()
+        AcpiTables::from_rsdp(AcpiMapper(0), rsdp_base).unwrap()
     }
 }
 
 pub fn platform_info(tables: AcpiTables<AcpiMapper>) -> PlatformInfo {
     tables.platform_info().unwrap()
-}
-
-pub fn processors(info: PlatformInfo) -> usize {
-    let p = info.processor_info.unwrap();
-
-    1 + p.application_processors.len()
 }

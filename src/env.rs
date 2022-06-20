@@ -1,14 +1,58 @@
+use crate::{arch::{VirtAddr, PAGE_SIZE}, mm::VirtualRegion};
 
 use core::ptr::addr_of;
-
-use libkloader::KernelInfo;
-
-use crate::arch::{PAGE_SIZE, VirtAddr};
-
+use alloc::boxed::Box;
+use libkloader::{KernelInfo, MemoryDescriptor};
 use spin::Once;
 
-use super::vmm::VirtualRegion;
+static KERNEL_ENV: Once<KernelEnv> = Once::new();
 
+#[derive(Debug)]
+pub struct KernelEnv {
+    pub memory_layout: &'static MemoryLayout,
+    pub memory_map: Box<[MemoryDescriptor]>,
+
+    #[cfg(target_arch="x86_64")]
+    pub rsdp_base: usize,
+
+    pub video: Option<Video>
+}
+
+#[derive(Debug)]
+pub struct Video {
+    pub frame_buffer: VirtAddr,
+    pub size: usize,
+    pub height: usize,
+    pub width: usize
+}
+
+pub fn init(bootinfo: &KernelInfo) {
+    // Copy the memory map to the heap
+    let memory_map = bootinfo.mem_map_info.get_memory_map().to_vec().into_boxed_slice();
+
+    init_memory_regions(&bootinfo);
+
+    KERNEL_ENV.call_once(|| {
+        KernelEnv {
+            memory_layout: memory_layout(),
+            memory_map,
+
+            #[cfg(target_arch="x86_64")]
+            rsdp_base: bootinfo.acpi_info.rsdp_base as usize,
+
+            video: Some(Video {
+                frame_buffer: VirtAddr::new(bootinfo.video_info.frame_buffer as u64),
+                size: bootinfo.video_info.frame_buffer_size as usize,
+                height: bootinfo.video_info.height as usize,
+                width: bootinfo.video_info.width as usize
+            }),
+        }
+    });
+}
+
+pub fn env<'env>() -> &'env KernelEnv {
+    KERNEL_ENV.get().expect("KernelEnv not initialized!")
+}
 extern "C" {
     static __kernel_code_start: u8;
     static __kernel_code_end: u8;
@@ -54,7 +98,7 @@ impl MemoryLayout {
 }
 
 /// Gather information about where the kernel is loaded and store it for later
-pub fn init_memory_regions(bootinfo: &KernelInfo) {
+fn init_memory_regions(bootinfo: &KernelInfo) {
     MEMORY_LAYOUT.call_once(|| {
             unsafe {
                 MemoryLayout {
@@ -76,10 +120,4 @@ pub fn init_memory_regions(bootinfo: &KernelInfo) {
 /// Returns various constants about the address space
 pub fn memory_layout() -> &'static MemoryLayout {
     MEMORY_LAYOUT.get().unwrap()
-}
-
-/// The start of the MMIO address space comes after the higher half physical memory range
-pub fn mmio_area_start() -> VirtAddr {
-    // Align to 2mb since we use huge frames
-    (memory_layout().phys_memory_start + ((memory_layout().phys_memory_size + 1) * PAGE_SIZE as u64)).align_up(0x1000000u64)
 }

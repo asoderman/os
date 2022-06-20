@@ -28,6 +28,7 @@ mod arch;
 mod cpu;
 mod common;
 mod dev;
+mod env;
 mod error;
 mod heap;
 mod info;
@@ -77,22 +78,19 @@ fn main(bootinfo: &KernelInfo) {
             panic!();
         });
 
-    mm::memory::init_memory_regions(bootinfo);
+    env::init(bootinfo);
+    drop(bootinfo);
 
     println!("=== {} {} ===\n", info::KERNEL_NAME, info::KERNEL_VERSION);
-    println!("start RSP: {:#X}", bootinfo.rsp);
-    println!("RSP after heap init: {:#X}", stack::get_rsp());
-    println!("est stack usage: {:#X}", bootinfo.rsp - stack::get_rsp());
     println!("Heap size: {}", heap_init_result.1 - heap_init_result.0);
 
-    mm::init(heap_init_result, bootinfo);
+    mm::init(heap_init_result);
 
-    println!("{:#X?}", mm::memory::memory_layout());
+    println!("{:#X?}", env::memory_layout());
 
-    arch::x86_64::platform_init(bootinfo);
+    arch::x86_64::platform_init();
 
     println!("Initializing interrupts");
-    println!("est stack usage: {:#X}", bootinfo.rsp - stack::get_rsp());
     interrupt::init().unwrap_or_else(|_| {
         println!("Unable to initialize interrupts");
     });
