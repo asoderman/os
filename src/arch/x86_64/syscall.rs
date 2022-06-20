@@ -1,7 +1,7 @@
 use core::arch::asm;
 
 use x86_64::VirtAddr;
-use x86_64::registers::model_specific::{LStar, Efer, EferFlags, Star, SFMask, Msr};
+use x86_64::registers::model_specific::{LStar, Efer, EferFlags, Star, SFMask};
 use x86_64::structures::tss::TaskStateSegment;
 
 use memoffset::offset_of;

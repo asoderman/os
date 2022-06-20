@@ -1,10 +1,9 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use alloc::{collections::BTreeMap, vec::Vec};
-use spin::Mutex;
+use alloc::vec::Vec;
 use x86_64::{PhysAddr, VirtAddr};
 
-use crate::{mm::{memory_manager, temp_page, TempPageGuard}, arch::PAGE_SIZE};
+use crate::{mm::memory_manager, arch::PAGE_SIZE};
 
 use lazy_static::lazy_static;
 
@@ -36,8 +35,7 @@ struct TrampolineArgs {
 
 #[derive(Debug)]
 pub(super) struct Trampoline {
-    phys_frame: PhysAddr, // TODO: Maybe hold a temp map guard here
-    //_frame_guard: TempPageGuard,
+    phys_frame: PhysAddr,
     args: TrampolineArgs,
     vector: usize
 }
@@ -51,13 +49,11 @@ impl Trampoline {
         crate::println!("Creating Trampoline");
 
         let phys_frame = Self::allocate_low_frame();
-        //let frame_guard = temp_page(VirtAddr::new(phys_frame.as_u64()));
 
         crate::println!("Trampoline created");
 
         Self {
             phys_frame,
-            //_frame_guard: frame_guard,
             args: TrampolineArgs::default(),
             vector: phys_frame.as_u64() as usize / PAGE_SIZE,
         }
@@ -67,7 +63,7 @@ impl Trampoline {
     /// the page specified by a 1 byte start vector.
     fn allocate_low_frame() -> PhysAddr {
         let addr = PhysAddr::new(TRAMPOLINE_LOAD_ADDRESS);
-        memory_manager().k_identity_map(addr, 1);
+        memory_manager().k_identity_map(addr).expect("Could not get low memory frame for trampoline");
         addr
     }
 
@@ -90,7 +86,6 @@ impl Trampoline {
         let page_table = x86_64::registers::control::Cr3::read().0.start_address();
 
         let ap_rsp = crate::stack::allocate_kernel_stack();
-        crate::println!("new Kernel stack created");
 
         self.args = TrampolineArgs {
             page_table: page_table.as_u64() as usize,
@@ -119,12 +114,12 @@ pub(super) fn wait_for_core(lapic_id: usize) {
 
 /// The rust entry point for ap's
 pub extern "C" fn ap_entry(lapic_id: usize) {
-    crate::println!("ap_entry lapic_id: {}", lapic_id);
+    println!("ap_entry lapic_id: {}", lapic_id);
     crate::arch::x86_64::ap_init(lapic_id);
     SMP_CORES_READY[super::this_core().local_apic_id as usize].store(true, Ordering::Release);
 
     for (i, core) in SMP_CORES_READY.iter().enumerate() {
-        crate::println!("core {} ready:{:?}", i, core);
+        println!("core {} ready:{:?}", i, core);
     }
 
     // Park the ap until scheduler is ready

@@ -13,6 +13,8 @@
 #![feature(asm_sym)]
 #![feature(const_ptr_offset_from)]
 #![feature(naked_functions)]
+#![feature(ptr_internals)]
+
 #![test_runner(test_runner)]
 
 #![reexport_test_harness_main = "test_main"]

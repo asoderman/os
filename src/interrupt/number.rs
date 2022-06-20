@@ -3,6 +3,7 @@ macro_rules! interrupt_num {
     ($name:ident, $num:literal) => {
         #[allow(non_snake_case)]
         #[allow(non_upper_case_globals)]
+        #[allow(dead_code)]
         impl Interrupt {
             pub const $name: u8 = $num;
         }

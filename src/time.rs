@@ -7,6 +7,7 @@ use crate::arch::x86_64::timers::rtc::Rtc;
 const SECOND: usize = 1;
 const MINUTE: usize = 60 * SECOND;
 const HOUR: usize = 60 * MINUTE;
+#[allow(dead_code)]
 const DAY: usize = 24 * HOUR;
 
 const _MONTH: usize = 30 * DAY; // 30.44
@@ -100,6 +101,7 @@ impl DateTime {
         Rtc::now()
     }
 
+    #[allow(dead_code)]
     pub fn utc_now() -> UnixEpoch {
         Self::now().into()
     }

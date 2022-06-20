@@ -28,7 +28,9 @@ const APIC_TMRDIV: usize = 0x3E0;
 const APIC_TMR_INITCNT: usize = 0x380;
 const APIC_TMRCURRCNT: usize = 0x390;
 const APIC_LVT_TMR: usize= 0x320;
-const APIC_NMI: usize = (4<<8);
+
+#[allow(dead_code)]
+const APIC_NMI: usize = 4 << 8;
 
 static ENABLE_APIC_MSR: Once = Once::new();
 
@@ -213,7 +215,7 @@ impl Lapic {
         super::super::pit::pit().wait(200);
         self.send_interrupt(Ipi::Sipi(trampoline_vec as u8), lapic_id).unwrap();
 
-        crate::println!("Wake core sent");
+        println!("Wake core sent");
 
         super::trampoline::wait_for_core(lapic_id as usize);
 

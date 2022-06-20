@@ -1,11 +1,8 @@
 use acpi::{AcpiHandler, PhysicalMapping, AcpiTables, PlatformInfo};
 
-
-use libkloader::KernelInfo;
 use x86_64::{align_up, align_down};
 
 use crate::mm::memory_manager;
-
 use crate::arch::{PhysAddr, VirtAddr, PAGE_SIZE};
 
 use core::ptr::NonNull;

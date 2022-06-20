@@ -1,7 +1,6 @@
 use core::ptr::NonNull;
-use core::sync::atomic::AtomicPtr;
-use core::sync::atomic::Ordering;
 use alloc::collections::BTreeSet;
+use spin::Once;
 use x86_64::PhysAddr;
 use x86_64::structures::paging::PageTable;
 use crate::arch::x86_64::VirtAddr;
@@ -16,7 +15,7 @@ use super::region::MemRegion;
 
 use itertools::Itertools;
 
-static mut KERNEL_PAGE_TABLE: AtomicPtr<PageTable> = AtomicPtr::new(0 as *mut _);
+static KERNEL_PAGE_TABLE: Once<PhysAddr> = Once::new();
 
 /// A virtual region of memory. If the regions overlap in any form their `Ord` will return `Equal`.
 /// Otherwise their `Ord` is as expected.
@@ -37,11 +36,6 @@ impl VirtualRegion {
     /// Returns an iterator of each starting virtual address in the range
     pub fn pages(&self) -> impl IntoIterator<Item=VirtAddr> {
         (self.start.as_u64()..self.region_end() as u64).step_by(PAGE_SIZE).map(|addr| VirtAddr::new(addr))
-    }
-
-    /// Returns the size of the region in pages
-    pub fn size(&self) -> usize {
-        self.size
     }
 
     pub fn end(&self) -> VirtAddr {
@@ -109,7 +103,7 @@ pub struct VirtualMemoryManager {
 }
 
 impl VirtualMemoryManager {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             kernel_reserved: BTreeSet::new(),
         }
@@ -192,12 +186,9 @@ impl VirtualMemoryManager {
 pub fn init_vmm() {
     let pml4 = x86_64::registers::control::Cr3::read().0;
 
-    unsafe {
-        KERNEL_PAGE_TABLE.store(
-            pml4.start_address().as_u64() as usize as *mut _,
-            Ordering::SeqCst,
-        );
-    }
+    KERNEL_PAGE_TABLE.call_once(||
+        pml4.start_address()
+    );
 
     // TODO: move this to a method
     let kernel_code = Mapping::existing(memory_layout().kernel_code_region(), MappingType::KernelCode);
@@ -205,11 +196,13 @@ pub fn init_vmm() {
     let kernel_stack = Mapping::existing(memory_layout().kernel_stack_region(), MappingType::KernelData);
     let kernel_phys = Mapping::existing(memory_layout().kernel_phys_region(), MappingType::KernelData);
 
-    super::MM.lock().vmm.insert_mapping(kernel_code).unwrap();
-    super::MM.lock().vmm.insert_mapping(kernel_data).unwrap();
-    super::MM.lock().vmm.insert_mapping(kernel_stack).unwrap();
-    super::MM.lock().vmm.insert_mapping(kernel_phys).unwrap();
-
+    {
+        let mut lock = super::MM.lock();
+        lock.vmm.insert_mapping(kernel_code).unwrap();
+        lock.vmm.insert_mapping(kernel_data).unwrap();
+        lock.vmm.insert_mapping(kernel_stack).unwrap();
+        lock.vmm.insert_mapping(kernel_phys).unwrap();
+    }
 }
 
 /// The start of the MMIO address space comes after the higher half physical memory range
@@ -218,11 +211,8 @@ pub fn mmio_area_start() -> VirtAddr {
     (memory_layout().phys_memory_start + ((memory_layout().phys_memory_size + 1) * PAGE_SIZE as u64)).align_up(0x1000000u64)
 }
 
-// TODO: doesnt need to be pub should be pub(super)
-pub fn get_kernel_context_virt() -> Option<NonNull<PageTable>> {
-    let paddr = unsafe { 
-        PhysAddr::new(KERNEL_PAGE_TABLE.load(Ordering::SeqCst) as u64)
-    };
+pub(super) fn get_kernel_context_virt() -> Option<NonNull<PageTable>> {
+    let paddr = KERNEL_PAGE_TABLE.get().copied().unwrap();
     let vaddr = phys_to_virt(paddr);
     NonNull::new(vaddr.as_mut_ptr())
 }

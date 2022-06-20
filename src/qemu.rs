@@ -1,4 +1,4 @@
-
+#![cfg(test)]
 const PORT: u16 = 0xf4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

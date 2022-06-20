@@ -35,7 +35,6 @@ pub type TaskHandle = Arc<RwLock<Task>>;
 #[thread_local]
 static CURRENT_PROC: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Debug)]
 pub struct ProcessList {
     list: BTreeMap<usize, TaskHandle>,
 }
@@ -52,8 +51,7 @@ impl ProcessList {
             id: 0,
             core_id: None,
             parent: None,
-            entry_point: VirtAddr::new(0),
-            kstack: VirtAddr::new(0),
+            _kstack: VirtAddr::new(0),
 
             status: Status::NotRunnable,
 
@@ -107,7 +105,7 @@ impl ProcessList {
                                 proc.write().status = Status::Ready;
                             }
                         },
-                        _ => todo!("Implement other forms of waking")
+                        //_ => todo!("Implement other forms of waking")
                     };
                 },
                 _ => ()
@@ -161,8 +159,7 @@ pub struct Task {
     pub id: usize,
     pub parent: Option<usize>,
     pub core_id: Option<usize>,
-    entry_point: VirtAddr,
-    kstack: VirtAddr,
+    _kstack: VirtAddr,
     status: Status,
     arch_context: Context,
 }
@@ -181,8 +178,7 @@ impl Task {
             id,
             core_id: None,
             parent: Some(pid()),
-            entry_point,
-            kstack: stack,
+            _kstack: stack,
             status: Status::Ready,
             arch_context: context
         }))

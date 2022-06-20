@@ -65,7 +65,7 @@ impl Eq for Mapping { }
 impl Drop for Mapping {
     fn drop(&mut self) {
         if self.attr.get_mut().contains(Attributes::NEEDS_UNMAP) {
-            crate::println!("Mapping dropped: {:?}", self);
+            println!("Mapping dropped: {:?}", self);
             todo!("Implement unmap/releasing physical frames back to pmm on drop");
         }
     }
@@ -141,21 +141,24 @@ impl Mapping {
         &self.range
     }
 
+    #[allow(dead_code)]
     pub fn is_read_only(&self) -> bool {
         !self.attr.get().contains(Attributes::RW)
     }
 
-    #[inline]
+    #[allow(dead_code)]
     pub fn read_only(&self) {
         self.remove_attr(Attributes::EX | Attributes::WRITE);
         self.set_attr(Attributes::READ);
     }
 
+    #[allow(dead_code)]
     pub fn read_write(&self) {
         self.remove_attr(Attributes::EX);
         self.set_attr(Attributes::READ | Attributes::WRITE);
     }
 
+    #[allow(dead_code)]
     pub fn executable(&self) {
         self.remove_attr(Attributes::WRITE);
         self.set_attr(Attributes::READ | Attributes::EX);

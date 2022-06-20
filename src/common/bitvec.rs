@@ -85,11 +85,6 @@ impl UnorderedBitVec {
         core::mem::size_of::<u64>() * 8
     }
 
-    /// The maximum bit within a block
-    const fn max_bit(&self) -> usize {
-        self.bits_per_block() - 1
-    }
-
     /// Gets a bit at the specified index
     pub fn get(&self, idx: usize) -> Option<bool> {
         let block_idx = idx / self.bits_per_block();

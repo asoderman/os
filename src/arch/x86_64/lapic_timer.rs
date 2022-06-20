@@ -1,10 +1,4 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
-
 use super::smp::lapic::Lapic;
-
-
-static mut LAPIC_TICKS_PER_10_MS: AtomicUsize = AtomicUsize::new(0);
-
 
 pub struct LapicTimer<'lapic> {
     lapic: &'lapic Lapic,
@@ -60,7 +54,7 @@ impl<'lapic> LapicTimer<'lapic> {
         self.ticks_per_10_ms = ticks_per_10_ms as usize;
 
         self.lapic.write_apic_register_initcnt(self.ticks_per_10_ms as u32);
-        crate::println!("ticks per 10 ms: {:?}", ticks_per_10_ms);
+        println!("ticks per 10 ms: {:?}", ticks_per_10_ms);
 
         Ok(())
     }

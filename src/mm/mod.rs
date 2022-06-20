@@ -17,7 +17,7 @@ pub use error::MemoryManagerError;
 use self::mapping::Mapping;
 use self::pmm::BitMapFrameAllocator;
 use self::vmm::{VirtualMemoryManager, VirtualMemoryError};
-pub use self::vmm::{get_kernel_context_virt, VirtualRegion};
+pub use self::vmm::VirtualRegion;
 pub use self::pmm::{write_physical, write_physical_slice, get_phys_as_mut};
 
 use lazy_static::lazy_static;
@@ -44,7 +44,7 @@ impl MemoryManager {
     }
 
     /// Identity maps a physical page into the virtual address space if it is available
-    pub fn k_identity_map(&mut self, paddr: PhysAddr, size: usize) -> Result<(), Error> {
+    pub fn k_identity_map(&mut self, paddr: PhysAddr) -> Result<(), Error> {
         let frame = self.pmm.request_frame(paddr)?;
         assert_eq!(frame, paddr);
         let mapping = mapping::Mapping::new_identity(frame);
@@ -110,19 +110,10 @@ pub fn init(heap_range: (VirtAddr, VirtAddr)) {
     init_vmm();
 }
 
-pub fn temp_page(vaddr: VirtAddr) -> TempPageGuard {
-    TempPageGuard(vaddr)
-}
 
 /// RAII guard for a temporary page. When this struct is dropped the page is unmapped.
 #[derive(Debug)]
 pub struct TempPageGuard(VirtAddr);
-
-impl TempPageGuard {
-    pub fn as_u64(&self) -> u64 {
-        self.0.as_u64()
-    }
-}
 
 impl Drop for TempPageGuard {
     fn drop(&mut self) {
@@ -138,6 +129,7 @@ mod test {
     use crate::arch::x86_64::paging::Mapper;
 
     use super::frame_allocator::FrameAllocator;
+    use super::vmm::get_kernel_context_virt;
 
     #[test_case]
     fn test_pmm_alloc_and_free() {
@@ -161,50 +153,49 @@ mod test {
     /// The VMM should not allow caller to reserve a region in use.
     #[test_case]
     fn test_vmm_overlap_reject() {
-        // TODO: do cleanup
         let test_region = VirtAddr::new(0);
         let region_size = 4;
         let within_test_region = test_region + 0x1000u64;
         let adjacent_region_start = test_region + region_size as u64 * PAGE_SIZE as u64;
 
-        // Take lock for duration of test 
-        let mut mm = MM.lock();
-        assert!(mm.vmm
+        let mut vmm = super::vmm::VirtualMemoryManager::new();
+
+        assert!(vmm
             .reserve_region(test_region, region_size)
             .is_ok());
         // Assert reservation of same region is rejected
         assert!(
-            mm.vmm
+            vmm
                 .reserve_region(test_region, region_size)
                 .is_err(),
             "VMM did not reject already reserved region"
         );
         assert!(
-            mm.vmm
+            vmm
                 .reserve_region(test_region, region_size + 1)
                 .is_err(),
             "VMM did not reject reserved super-region"
         );
         assert!(
-            mm.vmm
+            vmm
                 .reserve_region(test_region, 1)
                 .is_err(),
             "VMM did not reject reserved sub-region"
         );
         assert!(
-            mm.vmm
+            vmm
                 .reserve_region(within_test_region, 1)
                 .is_err(),
             "VMM did not reject reserved sub-region with different starts"
         );
         assert!(
-            mm.vmm
+            vmm
                 .reserve_region(within_test_region, region_size)
                 .is_err(),
             "VMM did not reject overlapping region"
         );
 
-        assert!(mm.vmm.reserve_region(adjacent_region_start, 1).is_ok(), "unable to reserve adjacent region. incorrect rejection");
+        assert!(vmm.reserve_region(adjacent_region_start, 1).is_ok(), "unable to reserve adjacent region. incorrect rejection");
     }
 
     #[test_case]
@@ -238,21 +229,5 @@ mod test {
         test_pt_walker.walk();
         assert!(test_pt_walker.next_entry().is_unused());
         assert_eq!(pmm_frames, pmm_frames_after_unmap);
-    }
-
-    #[test_case]
-    fn test_temp_page() {
-        // TODO: is there a way to test this while holding the lock the entire time?
-        // If a region is freed before we drop the temp page the test will fail
-        let test_addr = VirtAddr::new(0x10000);
-        let phys_frames = MM.lock().pmm.free_frames();
-        MM.lock().kmap(test_addr, 1).expect("temp page test fail");
-        let temp_page_result = temp_page(test_addr);
-
-        drop(temp_page_result);
-
-        let phys_frames_after_drop = MM.lock().pmm.free_frames();
-
-        assert_eq!(phys_frames, phys_frames_after_drop);
     }
 }

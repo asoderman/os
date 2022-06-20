@@ -83,6 +83,10 @@ impl Rtc {
 
         }
 
+        if is_24hr(Self::status_b()) {
+            todo!("Handle 24 hour time!")
+        }
+
         let time = Time {
             seconds,
             minutes,

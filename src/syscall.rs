@@ -4,7 +4,8 @@ pub mod handlers;
 
 pub use handlers::*;
 
-pub fn syscall(a: usize, b: usize, c: usize, d: usize, si: usize, di: usize) -> usize {
+#[allow(unused_variables)]
+pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> usize {
     match a {
         Syscall::HELLO_WORLD => {
             println!("Syscall: hello world!");
@@ -12,6 +13,7 @@ pub fn syscall(a: usize, b: usize, c: usize, d: usize, si: usize, di: usize) -> 
         },
         Syscall::SLEEP => sleep(b),
         Syscall::YIELD => yield_(),
+        Syscall::EXIT => do_exit(b),
         _ => usize::MAX
     }
 }

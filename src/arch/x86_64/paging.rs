@@ -1,7 +1,6 @@
 use core::{marker::PhantomData, ptr::NonNull};
 
 use crate::mm::frame_allocator::FrameAllocator;
-use crate::mm::get_phys_as_mut;
 
 use alloc::vec::Vec;
 use x86_64::{
@@ -22,8 +21,16 @@ impl Drop for Flusher {
 }
 
 impl Flusher {
-    fn flush(self) -> VirtAddr {
+    #[allow(dead_code)]
+    pub fn flush(self) -> VirtAddr {
         self.0
+    }
+
+    #[allow(dead_code)]
+    pub fn ignore(self) -> VirtAddr {
+        let addr = self.0;
+        core::mem::forget(self);
+        addr
     }
 }
 
@@ -65,11 +72,6 @@ impl<'a> Mapper<'a> {
         }
     }
 
-    /// The current page table leve the struct is operating on
-    pub fn pt_level(&self) -> usize {
-        self.current_level
-    }
-
     /// Advance the walker to the next PageTable. Returns Error if unable to presently advance
     /// however the issue may be resolvable.
     pub fn advance(&mut self) -> Result<(), MapError> {
@@ -91,6 +93,7 @@ impl<'a> Mapper<'a> {
     }
 
     /// Walk to the lowest page level.
+    #[allow(dead_code)]
     pub fn walk(&mut self) {
         loop {
             match self.advance() {
@@ -222,9 +225,11 @@ impl<'a> Mapper<'a> {
 
                     frame_allocator.deallocate_frame(self.unmap_next()?);
 
+                    /*
                     if !self.current_is_empty() {
-                        // crate::println!("Remaining entries: {:?}", self.entries_used_by_current());
+                        println!("Remaining entries: {:?}", self.entries_used_by_current());
                     }
+                    */
                 } else {
                     break;
                 }
@@ -239,6 +244,7 @@ impl<'a> Mapper<'a> {
         self.current().iter().map(|e| e.is_unused()).fold(true, |acc, elem| acc && elem)
     }
 
+    #[allow(dead_code)]
     fn entries_used_by_current(&mut self) -> Vec<(usize, &PageTableEntry)> {
         self.current().iter().enumerate().filter(|e| !e.1.is_unused()).collect()
     }
@@ -283,6 +289,8 @@ mod test {
 
     use super::*;
     use super::super::PhysAddr;
+
+    use crate::mm::get_phys_as_mut;
 
     /// Test the page table walker by following the address that maps to the start of physical
     /// memory. This is known to be a 2MB huge page mapped by kloader.

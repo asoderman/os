@@ -6,7 +6,6 @@ static mut IDT: Option<IDTInfo> = None;
 
 struct IDTInfo {
     ptr: Box<InterruptDescriptorTable>,
-    size: usize
 }
 
 impl IDTInfo {
@@ -50,7 +49,7 @@ pub fn init_idt() -> Result<(), ()> {
         let idt = Box::new(InterruptDescriptorTable::new());
         // Set the global IDT
         unsafe {
-            IDT = Some(IDTInfo { ptr: idt, size: core::mem::size_of::<InterruptDescriptorTable>() });
+            IDT = Some(IDTInfo { ptr: idt });
             IDT.as_mut().ok_or(())?.get_idt_mut().reset();
         }
     }
@@ -72,6 +71,7 @@ pub fn get_idt_mut() -> Option<&'static mut InterruptDescriptorTable> {
     }
 }
 
+#[allow(dead_code)]
 pub unsafe fn register_interrupt_handler(num: usize, f: extern "x86-interrupt" fn(InterruptStackFrame)) {
     if let Some(idt) = &mut IDT {
         idt.get_idt_mut()[num].set_handler_fn(f).set_present(true);

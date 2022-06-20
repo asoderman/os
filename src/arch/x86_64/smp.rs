@@ -1,9 +1,6 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
-
 use alloc::vec::Vec;
-use libkloader::KernelInfo;
 use ::acpi::{InterruptModel, platform::ProcessorInfo};
-use spin::{RwLockReadGuard, RwLockWriteGuard};
+use spin::{RwLockReadGuard, Once};
 use x86_64::PhysAddr;
 use crate::acpi;
 
@@ -16,7 +13,7 @@ pub(super) mod thread_local;
 
 pub use cpulist::cpu_list;
 
-static CORES: AtomicUsize = AtomicUsize::new(0);
+static CORES: Once<usize> = Once::new();
 
 #[derive(Debug, Default)]
 pub struct CpuLocals {
@@ -109,7 +106,7 @@ pub enum SmpError {
 
 /// Initializes the SMP subsystem
 pub fn init_smp() -> Result<(), SmpError> {
-    crate::println!("Enabling SMP");
+    println!("Enabling SMP");
     let tables = acpi::acpi_tables();
     let info = acpi::platform_info(tables);
 
@@ -161,7 +158,7 @@ fn apic_list_cores(info: &ProcessorInfo) {
 
     let core_count = cpulist::init_cpu_list(cores);
 
-    CORES.store(core_count, Ordering::SeqCst);
+    CORES.call_once(|| core_count);
 }
 
 pub(super) fn init_smp_ap(lapic_id: usize) {
@@ -170,20 +167,11 @@ pub(super) fn init_smp_ap(lapic_id: usize) {
     lapic::Lapic::new().initialize().expect("Failed to initialize LAPIC for ap!");
 }
 
-/// Gets the lapic for the current core
-fn lapic() -> Lapic {
-    Lapic::new()
-}
-
 pub fn this_core<'c>() -> RwLockReadGuard<'c, Core> {
     cpu_list()[CpuLocals::get().lapic_id].read()
 }
 
-pub fn this_core_mut<'c>() -> RwLockWriteGuard<'c, Core> {
-    cpu_list()[CpuLocals::get().lapic_id].write()
-}
-
 /// Gets the smp core count
 pub fn smp_cores() -> usize {
-    CORES.load(Ordering::SeqCst)
+    CORES.get().copied().unwrap()
 }

@@ -1,7 +1,5 @@
 use x86_64::structures::idt::InterruptStackFrame;
 
-use crate::{println, arch::x86_64::paging::Mapper, mm::get_kernel_context_virt};
-
 mod handlers;
 pub mod number;
 
@@ -15,19 +13,6 @@ pub fn eoi() {
         // TODO: this maps the lapic on every call. FIX THIS!!!
         crate::arch::x86_64::smp::lapic::Lapic::new().eoi();
     }
-}
-
-fn page_fault_err(frame: InterruptStackFrame, _index: u8, error_code: Option<u64>) {
-    let cr2 = x86_64::registers::control::Cr2::read();
-    unsafe {
-        let mut m = Mapper::new(cr2, get_kernel_context_virt().unwrap().as_mut());
-
-        loop {
-            println!("{:?}", m.next_entry());
-            if m.advance().is_err() { break; }
-        }
-    }
-    panic!("<Kernel Pagefault> e: {:#}\n --\n Cr2: {:?}\n{:?}", error_code.unwrap(), cr2, frame);
 }
 
 pub fn interrupts_enabled() -> bool {

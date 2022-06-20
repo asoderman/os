@@ -1,8 +1,5 @@
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    ptr::NonNull, };
+use core::alloc::Layout;
 use libkloader::MemoryMapInfo;
-use spin::{Mutex, MutexGuard};
 use crate::arch::VirtAddr;
 
 use crate::{dev::serial::write_serial_out, mm::get_init_heap_section};
@@ -13,88 +10,11 @@ use linked_list_allocator::LockedHeap;
 #[global_allocator]
 static ALLOC: LockedHeap = LockedHeap::empty();
 
-struct LockedAllocator<A> {
-    pub a: Mutex<A>,
-}
-
-impl<A> LockedAllocator<A> {
-    pub const fn new(allocator: A) -> Self {
-        LockedAllocator {
-            a: Mutex::new(allocator),
-        }
-    }
-
-    pub fn lock(&self) -> MutexGuard<'_, A> {
-        self.a.lock()
-    }
-}
-
-unsafe impl GlobalAlloc for LockedAllocator<TinyAlloc> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.a.lock().allocate(layout).as_mut()
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        self.a
-            .lock()
-            .deallocate(NonNull::new_unchecked(ptr), layout)
-    }
-}
-
 #[alloc_error_handler]
 fn alloc_error_panic(_info: Layout) -> ! {
     panic!("Alloc error occured: \n{:?}", _info);
 }
 
-
-struct TinyAlloc {
-    start_addr: usize,
-    used: usize,
-    size: usize,
-    initialized: bool,
-}
-
-impl TinyAlloc {
-    const fn uninit() -> Self {
-        TinyAlloc {
-            start_addr: 0,
-            used: 0,
-            size: 0,
-            initialized: false,
-        }
-    }
-
-    pub fn init(&mut self, start: VirtAddr, end: VirtAddr) {
-        assert!(!self.initialized);
-
-        self.start_addr = start.as_u64() as usize;
-        self.size = (end - start) as usize;
-        self.initialized = true;
-        write_serial_out("heap init complete\n");
-    }
-}
-
-impl TinyAlloc {
-    fn allocate(&mut self, layout: Layout) -> NonNull<u8> {
-        if !self.initialized {
-            write_serial_out("Tried to allocate before heap initialized");
-            panic!("Tried to allocate before heap initialized");
-        }
-
-        let size = layout.size();
-        let align = layout.align();
-        let used = self.used;
-        let ptr = unsafe { (self.start_addr as *mut u8).offset(used as isize) };
-
-        let align_needed = ptr.align_offset(align);
-
-        self.used += size + align_needed;
-
-        unsafe { NonNull::new(ptr.offset(align_needed as isize)).unwrap() }
-    }
-
-    fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
-}
 
 #[derive(Clone, Debug)]
 pub struct HeapInitError(&'static str);

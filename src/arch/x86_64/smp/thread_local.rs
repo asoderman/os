@@ -14,6 +14,7 @@ static mut TLS_INIT: AtomicBool = AtomicBool::new(false);
 const FS_BASE_MSR: u32 = 0xC0000100;
 // TODO: Use gsbase for kernel thread_locals once supported
 const GS_BASE_MSR: u32 = 0xC0000101;
+#[allow(dead_code)]
 const KERNEL_GS_BASE_MSR: u32 = 0xC0000102;
 
 /// Writes to the fs_base MSR
@@ -57,7 +58,7 @@ pub fn init_thread_local(lapic_id: usize) {
     // _tdata -> tbss is only the size for a single core
     unsafe {
         // Initialize TCB once
-        init_tcb(super::CORES.load(Ordering::SeqCst));
+        init_tcb(super::smp_cores());
 
         // get tls base for our lapic id
         set_fs_base(tls_base(lapic_id));
