@@ -2,7 +2,7 @@ use super::smp::lapic::Lapic;
 
 pub struct LapicTimer<'lapic> {
     lapic: &'lapic Lapic,
-    ticks_per_10_ms: usize,
+    ticks_per_ms: usize,
 }
 
 impl<'lapic> LapicTimer<'lapic> {
@@ -10,7 +10,7 @@ impl<'lapic> LapicTimer<'lapic> {
     pub fn new(lapic: &'lapic Lapic) -> Self {
         LapicTimer {
             lapic,
-            ticks_per_10_ms: 0,
+            ticks_per_ms: 0,
         }
     }
 
@@ -44,17 +44,17 @@ impl<'lapic> LapicTimer<'lapic> {
         // start timer
         self.enable();
 
-        super::pit::pit().wait(10);
+        super::pit::pit().wait(1);
 
         // stop timer
         self.disable();
 
-        let ticks_per_10_ms = START_COUNT - self.lapic.read_apic_timer_current_count();
+        let ticks_per_ms = START_COUNT - self.lapic.read_apic_timer_current_count();
 
-        self.ticks_per_10_ms = ticks_per_10_ms as usize;
+        self.ticks_per_ms = ticks_per_ms as usize;
 
-        self.lapic.write_apic_register_initcnt(self.ticks_per_10_ms as u32);
-        println!("ticks per 10 ms: {:?}", ticks_per_10_ms);
+        self.lapic.write_apic_register_initcnt(self.ticks_per_ms as u32);
+        println!("ticks per 10 ms: {:?}", ticks_per_ms);
 
         Ok(())
     }
