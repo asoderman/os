@@ -1,5 +1,6 @@
 use core::alloc::Layout;
 use libkloader::MemoryMapInfo;
+use spin::Once;
 use crate::arch::VirtAddr;
 
 use crate::{dev::serial::write_serial_out, mm::get_init_heap_section};
@@ -9,6 +10,8 @@ use linked_list_allocator::LockedHeap;
 // TODO: Implement slab allocator but for now use linked_list_allocator crate
 #[global_allocator]
 static ALLOC: LockedHeap = LockedHeap::empty();
+
+pub static HEAP_READY: Once = Once::new();
 
 #[alloc_error_handler]
 fn alloc_error_panic(_info: Layout) -> ! {
@@ -40,7 +43,8 @@ pub fn init_heap(
     unsafe {
         ALLOC.lock().init(heap_start as usize, heap_size as usize);
     }
-    write_serial_out("initializing heap returned \n");
+
+    HEAP_READY.call_once(|| ());
 
     Ok((VirtAddr::new(heap_start), heap_end_exclusive))
 }

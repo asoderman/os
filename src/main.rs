@@ -35,6 +35,7 @@ mod error;
 mod heap;
 mod info;
 mod interrupt;
+mod log;
 mod mm;
 mod proc;
 mod qemu;
@@ -48,6 +49,7 @@ use core::panic::PanicInfo;
 
 use libkloader::KernelInfo;
 use x86_64::VirtAddr;
+use ::log::info;
 
 use dev::serial::write_serial_out;
 use heap::init_heap;
@@ -79,6 +81,10 @@ fn main(bootinfo: &KernelInfo) {
             write_serial_out(e.as_str());
             panic!();
         });
+
+    log::init();
+
+    info!("Heap init");
 
     env::init(bootinfo);
     drop(bootinfo);
