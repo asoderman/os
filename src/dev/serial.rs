@@ -1,13 +1,61 @@
 use spin::Mutex;
-use core::fmt::{Write, Error};
+use core::fmt::{Write, Error, Display};
 
 use x86_64::instructions::port::PortWriteOnly;
-use log::Log;
+use log::{Log, Level};
 
 static SERIAL_OUT: Mutex<Serial> = Mutex::new(Serial::com1());
 static SERIAL_REF: SerialRef = SerialRef(&SERIAL_OUT);
 
 const COM1: u16 = 0x3F8;
+
+#[derive(Debug)]
+enum Color<'s, T: Display> {
+    Red(&'s T),
+    Green(&'s T),
+    Blue(&'s T),
+    Cyan(&'s T),
+    Yellow(&'s T),
+    //White(&'s T),
+}
+
+impl<'s, T: Display> Color<'s, T> {
+    fn escape_code(&self) -> &'static str {
+        match self {
+            Self::Red(_) => "\x1b[31m",
+            Self::Green(_) => "\x1b[32m",
+            Self::Yellow(_) => "\x1b[33m",
+            Self::Blue(_) => "\x1b[34m",
+            Self::Cyan(_) => "\x1b[36m",
+            //Self::White(_) => "\x1b[37m",
+        }
+    }
+
+    fn inner(&self) -> &'s T {
+        match self {
+            Self::Red(inner) => inner,
+            Self::Green(inner) => inner,
+            Self::Yellow(inner) => inner,
+            Self::Blue(inner) => inner,
+            Self::Cyan(inner) => inner,
+            //Self::White(inner) => inner,
+        }
+    }
+
+    fn off() -> &'static str {
+        "\x1b[0m"
+    }
+}
+
+impl<'s, T: Display> Display for Color<'s, T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{escape_code}{inner}{off}", 
+            escape_code = self.escape_code(),
+            inner = self.inner(),
+            off = Self::off()
+        )
+    }
+}
 
 pub struct Serial {
     port: u16
@@ -50,7 +98,16 @@ impl Log for SerialRef {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            println!("[{}]:{}", record.level(), record.args());
+            let level = record.level();
+            let c_level = match record.level() {
+                Level::Error => { Color::Red(&level) },
+                Level::Warn => { Color::Yellow(&level) },
+                Level::Info => { Color::Blue(&level) },
+                Level::Debug => { Color::Green(&level) },
+                Level::Trace => { Color::Cyan(&level) }
+            };
+
+            println!("[{}]: {}", c_level, record.args());
         }
     }
 
