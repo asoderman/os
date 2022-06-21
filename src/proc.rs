@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
 use core::ops::Bound::{Excluded, Unbounded};
 
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::collections::BTreeMap;
 
@@ -8,8 +9,10 @@ use lazy_static::lazy_static;
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::interrupt::{enable_and_halt, disable_interrupts, without_interrupts};
+use crate::mm::AddressSpace;
+use crate::stack::KernelStack;
 use crate::time::{Seconds, Time};
-use crate::{arch::{Context, VirtAddr, x86_64::apic_id, x86_64::set_tss_rsp0}, stack::allocate_kernel_stack};
+use crate::arch::{{Context, VirtAddr}, x86_64::apic_id, x86_64::set_tss_rsp0};
 
 lazy_static! {
     static ref PROCESS_LIST: RwLock<ProcessList> = RwLock::new(ProcessList::new());
@@ -50,8 +53,9 @@ impl ProcessList {
         let pid0 = Task {
             id: 0,
             core_id: None,
+            address_space: None,
             parent: None,
-            _kstack: VirtAddr::new(0),
+            kstack: None,
 
             status: Status::NotRunnable,
 
@@ -159,26 +163,32 @@ pub struct Task {
     pub id: usize,
     pub parent: Option<usize>,
     pub core_id: Option<usize>,
-    _kstack: VirtAddr,
+    #[allow(unused)]
+    address_space: Option<Box<AddressSpace>>,
+    kstack: Option<KernelStack>,
     status: Status,
     arch_context: Context,
 }
 
 impl Task {
     fn new(id: usize, entry_point: VirtAddr) -> Arc<RwLock<Self>> {
-        let stack = allocate_kernel_stack();
+        let stack = KernelStack::new();
         let mut context = Context::default();
 
-        context.set_rsp(stack);
+        context.set_rsp(stack.top());
         context.push(entry_point.as_u64() as usize);
 
-        context.set_cr3(crate::arch::x86_64::paging::get_cr3());
+        let address_space = Box::new(AddressSpace::new_user_from_kernel());
+
+        context.set_cr3(address_space.phys_addr());
+
 
         Arc::new(RwLock::new(Task {
             id,
             core_id: None,
             parent: Some(pid()),
-            _kstack: stack,
+            address_space: Some(address_space),
+            kstack: Some(stack),
             status: Status::Ready,
             arch_context: context
         }))

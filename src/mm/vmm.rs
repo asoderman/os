@@ -1,21 +1,24 @@
-use core::ptr::NonNull;
+use core::ptr::Unique;
 use alloc::collections::BTreeSet;
-use spin::Once;
-use x86_64::PhysAddr;
+use alloc::sync::Arc;
+use spin::Mutex;
 use x86_64::structures::paging::PageTable;
-use crate::arch::x86_64::VirtAddr;
-use crate::arch::PAGE_SIZE;
+use crate::arch::{VirtAddr, PhysAddr, PAGE_SIZE};
 use crate::env::memory_layout;
 use core::fmt::Debug;
 use super::frame_allocator::FrameAllocator;
-use super::mapping::Mapping;
-use super::mapping::MappingType;
-use super::pmm::phys_to_virt;
+
+use super::mapping::{Mapping, MappingType};
+use super::pmm::{phys_to_virt, physical_memory_manager, virt_to_phys};
 use super::region::MemRegion;
 
 use itertools::Itertools;
 
-static KERNEL_PAGE_TABLE: Once<PhysAddr> = Once::new();
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref KERNEL_ADDRESS_SPACE: Mutex<AddressSpace> = Mutex::new(AddressSpace::empty());
+}
 
 /// A virtual region of memory. If the regions overlap in any form their `Ord` will return `Equal`.
 /// Otherwise their `Ord` is as expected.
@@ -97,75 +100,95 @@ pub enum VirtualMemoryError {
     UnmapNonPresent
 }
 
-#[derive(Debug, Default)]
-pub struct VirtualMemoryManager {
-    kernel_reserved: BTreeSet<Mapping>,
+#[derive(Debug)]
+pub struct AddressSpace {
+    page_table: Unique<PageTable>,
+    mappings: BTreeSet<Arc<Mapping>>,
 }
 
-impl VirtualMemoryManager {
-    pub fn new() -> Self {
-        Self {
-            kernel_reserved: BTreeSet::new(),
+impl Clone for AddressSpace {
+    /// Clones the top most page table and the set of all mappings. Does not clone each subsequent
+    /// page table.
+    fn clone(&self) -> Self {
+        let phys_frame = physical_memory_manager().lock().allocate_frame();
+        let page_table_ptr: *mut PageTable = phys_to_virt(phys_frame).as_mut_ptr();
+        unsafe {
+            // Perform shallow page table clone
+             for (dst, src) in page_table_ptr.as_mut().unwrap().iter_mut().zip(self.page_table.as_ref().iter()) {
+                 dst.clone_from(src);
+             }
+
+            Self {
+                page_table: Unique::new_unchecked(page_table_ptr),
+                mappings: self.mappings.clone() 
+            }
         }
+    }
+}
+
+impl AddressSpace {
+    fn empty() -> Self {
+        Self {
+            page_table: Unique::dangling(),
+            mappings: BTreeSet::new()
+        }
+    }
+
+    /// Clones the kernel address space but the result will not have access to the mappings resulting in an
+    /// "empty" address space but has the correct kernel page table setup
+    pub fn new_user_from_kernel() -> Self {
+        let mut addr_space = get_kernel_context_virt().lock().clone();
+
+        addr_space.mappings.clear();
+
+        addr_space
+    }
+
+    pub(super) fn page_table(&mut self) -> &mut PageTable {
+        unsafe {
+            self.page_table.as_mut()
+        }
+    }
+
+    pub fn phys_addr(&self) -> PhysAddr {
+        virt_to_phys(VirtAddr::new(self.page_table.as_ptr() as u64))
     }
 
     pub(super) fn insert_and_map(&mut self, mut mapping: Mapping, frame_allocator: &mut impl FrameAllocator) -> Result<(), Error> {
-        let kernel_pt = unsafe {
-            get_kernel_context_virt().unwrap().as_mut()
-        };
         // FIXME: Should throw an error if attempting to overwrite
-        mapping.map(kernel_pt, frame_allocator).unwrap();
-        self.insert_mapping(mapping)?;
-        Ok(())
+        mapping.map(self.page_table(), frame_allocator).unwrap();
+        self.insert_mapping(mapping)
     }
 
     pub(super) fn insert_mapping(&mut self, mapping: Mapping) -> Result<(), Error> {
-        self.kernel_reserved.insert(mapping).then_some(()).ok_or(VirtualMemoryError::RegionInUse(""))
-    }
-
-    /// Attempts to reserve the specified region of virtual memory. If the region is unavailable
-    /// returns `Error`, The region may not necessarily be mapped
-    pub fn reserve_region(&mut self, vaddr: VirtAddr, size: usize) -> Result<VirtAddr, Error> {
-        let mapping = Mapping::new_empty(VirtualRegion {
-            start: vaddr,
-            size,
-        });
-        if self.kernel_reserved.insert(mapping) {
-            Ok(vaddr)
-        } else {
-            Err(VirtualMemoryError::RegionInUse(""))
-        }
+        self.mappings.insert(Arc::new(mapping)).then_some(()).ok_or(VirtualMemoryError::RegionInUse(""))
     }
 
     /// Removes and unmaps the region containing the region provided as arguments
     pub fn release_region(&mut self, vaddr: VirtAddr, size: usize, frame_allocator: &mut impl FrameAllocator) -> Result<(), VirtualMemoryError> {
-        let kernel_pt = unsafe {
-            get_kernel_context_virt().unwrap().as_mut()
-        };
         let empty_region = &Mapping::new_empty(VirtualRegion::new(vaddr, size));
-        self.kernel_reserved.take(empty_region).unwrap().unmap(kernel_pt, frame_allocator, true)
+        let region = self.mappings.take(empty_region).ok_or(VirtualMemoryError::UnmapNonPresent)?;
+
+        // TODO: RAII unmapping for shared memory
+        // Attempt to destroy the mapping
+        let _ = Arc::try_unwrap(region).map(|r| r.unmap(self.page_table(), frame_allocator, true));
+        Ok(())
     }
 
-    pub fn mapping_containing(&self, addr: VirtAddr) -> Option<&Mapping> {
-        self.kernel_reserved.get(&Mapping::from_address(addr))
-    }
-
-    /// Map any region above or at the provided address that can accomodate the provided size.
-    pub fn reserve_any_after(&mut self, addr: VirtAddr, size: usize) -> Result<VirtAddr, Error> {
-        let region = self.first_available_addr_above(addr, size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
-
-        self.reserve_region(region.start, size)
+    #[allow(dead_code)]
+    pub fn mapping_containing(&self, addr: VirtAddr) -> Option<&Arc<Mapping>> {
+        self.mappings.get(&Mapping::from_address(addr))
     }
 
     /// Find a suitable region at or above the provided address
     pub fn first_available_addr_above(&self, addr: VirtAddr, size: usize) -> Option<VirtualRegion> {
         let region = VirtualRegion::new(addr, size);
 
-        if self.kernel_reserved.get(&Mapping::new_empty(region)).is_none() {
+        if self.mappings.get(&Mapping::new_empty(region)).is_none() {
             return Some(region)
         }
 
-        for (left, right) in self.kernel_reserved.range(Mapping::from_address(addr)..).tuple_windows() {
+        for (left, right) in self.mappings.range(Mapping::from_address(addr)..).tuple_windows() {
             if left.virt_range().contiguous(right.virt_range()) {
                 continue;
             }
@@ -186,9 +209,15 @@ impl VirtualMemoryManager {
 pub fn init_vmm() {
     let pml4 = x86_64::registers::control::Cr3::read().0;
 
-    KERNEL_PAGE_TABLE.call_once(||
-        pml4.start_address()
-    );
+    // Construct the kernel address space
+    let kas = {
+        let paddr = pml4.start_address();
+        Unique::new(phys_to_virt(paddr).as_mut_ptr()).unwrap()
+    };
+
+    // Store it within the lock
+    let mut lock = KERNEL_ADDRESS_SPACE.lock();
+    lock.page_table = kas;
 
     // TODO: move this to a method
     let kernel_code = Mapping::existing(memory_layout().kernel_code_region(), MappingType::KernelCode);
@@ -196,13 +225,10 @@ pub fn init_vmm() {
     let kernel_stack = Mapping::existing(memory_layout().kernel_stack_region(), MappingType::KernelData);
     let kernel_phys = Mapping::existing(memory_layout().kernel_phys_region(), MappingType::KernelData);
 
-    {
-        let mut lock = super::MM.lock();
-        lock.vmm.insert_mapping(kernel_code).unwrap();
-        lock.vmm.insert_mapping(kernel_data).unwrap();
-        lock.vmm.insert_mapping(kernel_stack).unwrap();
-        lock.vmm.insert_mapping(kernel_phys).unwrap();
-    }
+    lock.insert_mapping(kernel_code).unwrap();
+    lock.insert_mapping(kernel_data).unwrap();
+    lock.insert_mapping(kernel_stack).unwrap();
+    lock.insert_mapping(kernel_phys).unwrap();
 }
 
 /// The start of the MMIO address space comes after the higher half physical memory range
@@ -211,8 +237,62 @@ pub fn mmio_area_start() -> VirtAddr {
     (memory_layout().phys_memory_start + ((memory_layout().phys_memory_size + 1) * PAGE_SIZE as u64)).align_up(0x1000000u64)
 }
 
-pub(super) fn get_kernel_context_virt() -> Option<NonNull<PageTable>> {
-    let paddr = KERNEL_PAGE_TABLE.get().copied().unwrap();
-    let vaddr = phys_to_virt(paddr);
-    NonNull::new(vaddr.as_mut_ptr())
+pub(super) fn get_kernel_context_virt<'kernel>() -> &'kernel Mutex<AddressSpace> {
+    &KERNEL_ADDRESS_SPACE
+}
+
+#[cfg(test)]
+mod test {
+    /*
+    use super::*;
+    use crate::arch::PAGE_SIZE;
+
+    /// The VMM should not allow caller to reserve a region in use.
+    #[test_case]
+    fn test_vmm_overlap_reject() {
+        let test_region = VirtAddr::new(0);
+        let region_size = 4;
+        let within_test_region = test_region + 0x1000u64;
+        let adjacent_region_start = test_region + region_size as u64 * PAGE_SIZE as u64;
+
+        let mut vmm = AddressSpace::empty();
+
+        assert!(vmm
+            .reserve_region(test_region, region_size)
+            .is_ok());
+        // Assert reservation of same region is rejected
+        assert!(
+            vmm
+                .reserve_region(test_region, region_size)
+                .is_err(),
+            "VMM did not reject already reserved region"
+        );
+        assert!(
+            vmm
+                .reserve_region(test_region, region_size + 1)
+                .is_err(),
+            "VMM did not reject reserved super-region"
+        );
+        assert!(
+            vmm
+                .reserve_region(test_region, 1)
+                .is_err(),
+            "VMM did not reject reserved sub-region"
+        );
+        assert!(
+            vmm
+                .reserve_region(within_test_region, 1)
+                .is_err(),
+            "VMM did not reject reserved sub-region with different starts"
+        );
+        assert!(
+            vmm
+                .reserve_region(within_test_region, region_size)
+                .is_err(),
+            "VMM did not reject overlapping region"
+        );
+
+        assert!(vmm.reserve_region(adjacent_region_start, 1).is_ok(), "unable to reserve adjacent region. incorrect rejection");
+    }
+    */
 }

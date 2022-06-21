@@ -4,7 +4,7 @@ use crate::error::Error;
 use alloc::boxed::Box;
 use libkloader::{MemoryMapInfo, MemoryDescriptor};
 
-use spin::Once;
+use spin::{Once, Mutex};
 use x86_64::structures::paging::frame::{PhysFrame, PhysFrameRange};
 use x86_64::structures::paging::page::Size4KiB;
 
@@ -13,6 +13,8 @@ use crate::common::bitvec::UnorderedBitVec;
 use super::frame_allocator::FrameAllocator;
 
 static PHYS_OFFSET: Once<usize> = Once::new();
+
+pub(super) static PMM: Once<Mutex<BitMapFrameAllocator>> = Once::new();
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhysicalMemoryError {
@@ -111,6 +113,20 @@ impl BitMapFrameAllocator {
     }
 }
 
+pub(super) fn init(heap_range: (VirtAddr, VirtAddr)) {
+    init_phys_offset(crate::env::memory_layout().phys_memory_start.as_u64() as usize);
+    let mem_map = &crate::env::env().memory_map;
+    PMM.call_once(|| {
+        let mut pmm = BitMapFrameAllocator::uninit();
+        pmm.init(mem_map, heap_range.0, heap_range.1);
+        Mutex::new(pmm)
+    });
+}
+
+pub fn physical_memory_manager<'pmm>() -> &'pmm Mutex<BitMapFrameAllocator> {
+    PMM.get().unwrap()
+}
+
 fn page_number(addr: PhysAddr) -> usize {
     addr.as_u64() as usize / PAGE_SIZE
 }
@@ -132,6 +148,10 @@ impl FrameAllocator for BitMapFrameAllocator {
 /// Returns the virtual address to the corresponding physical memory
 pub fn phys_to_virt(paddr: PhysAddr) -> VirtAddr {
     VirtAddr::new(paddr.as_u64() + PHYS_OFFSET.get().copied().unwrap() as u64)
+}
+
+pub(super) fn virt_to_phys(vaddr: VirtAddr) -> PhysAddr {
+    PhysAddr::new(vaddr.as_u64() - PHYS_OFFSET.get().copied().unwrap() as u64)
 }
 
 pub unsafe fn write_physical<T: Sized + Clone>(addr: PhysAddr, value: T) {
@@ -192,17 +212,36 @@ mod test {
     #[test_case]
     fn test_request_range() {
         // NOTE: This only tests finding the frame from the stack allocator and not in the regions
-        let mut mm_lock = memory_manager();
-        let test_addr = mm_lock.pmm.allocate_frame();
-        mm_lock.pmm.deallocate_frame(test_addr.clone());
-        let pre = mm_lock.pmm.is_available(test_addr);
-        let f = mm_lock.pmm.request_frame(test_addr);
-        let post = mm_lock.pmm.is_available(test_addr);
+        let mut pmm = physical_memory_manager().lock();
+        let test_addr = pmm.allocate_frame();
+        pmm.deallocate_frame(test_addr.clone());
+        let pre = pmm.is_available(test_addr);
+        let f = pmm.request_frame(test_addr);
+        let post = pmm.is_available(test_addr);
 
         assert!(pre);
         assert!(f.is_ok());
         assert!(!post);
 
-        mm_lock.pmm.deallocate_frame(f.unwrap());
+        pmm.deallocate_frame(f.unwrap());
+    }
+
+    #[test_case]
+    fn test_pmm_alloc_and_free() {
+        // Take lock for duration of test
+        let mut pmm = physical_memory_manager().lock();
+
+        let starting_frame_count = pmm.free_frames();
+        let frame = pmm.allocate_frame();
+        let frame2 = pmm.allocate_frame();
+        let frame_count_after_alloc = pmm.free_frames();
+
+        pmm.deallocate_frame(frame);
+        pmm.deallocate_frame(frame2);
+        let frame_count_after_free = pmm.free_frames();
+
+        assert_ne!(frame, frame2);
+        assert_ne!(starting_frame_count, frame_count_after_alloc);
+        assert_eq!(starting_frame_count, frame_count_after_free);
     }
 }

@@ -1,5 +1,4 @@
-use core::cell::Cell;
-
+use spin::RwLock;
 use x86_64::{structures::paging::PageTable, VirtAddr};
 
 use super::{vmm::{VirtualRegion, VirtualMemoryError}, frame_allocator::FrameAllocator};
@@ -39,7 +38,7 @@ pub struct Mapping {
     range: VirtualRegion,
     kind: MappingType,
     // Use Cell to allow us to modify attributes while the mapping is in the list
-    attr: Cell<Attributes>
+    attr: RwLock<Attributes>
 }
 
 impl Ord for Mapping {
@@ -77,7 +76,7 @@ impl Mapping {
         Mapping {
             range,
             kind,
-            attr: Cell::new(Attributes::NEEDS_UNMAP)
+            attr: RwLock::new(Attributes::NEEDS_UNMAP)
         }
     }
 
@@ -86,7 +85,7 @@ impl Mapping {
         Mapping {
             range,
             kind: MappingType::KernelData,
-            attr: Cell::new(Attributes::RW)
+            attr: RwLock::new(Attributes::RW)
         }
     }
 
@@ -96,7 +95,7 @@ impl Mapping {
         Mapping {
             range,
             kind: MappingType::Empty,
-            attr: Cell::new(Attributes::empty())
+            attr: RwLock::new(Attributes::empty())
         }
     }
 
@@ -105,7 +104,7 @@ impl Mapping {
         Mapping {
             range,
             kind: MappingType::MMIO(paddr),
-            attr: Cell::new(Attributes::RW)
+            attr: RwLock::new(Attributes::RW)
         }
     }
 
@@ -115,7 +114,7 @@ impl Mapping {
         Mapping {
             range,
             kind: MappingType::Identity(paddr),
-            attr: Cell::new(Attributes::RW)
+            attr: RwLock::new(Attributes::RW)
         }
     }
 
@@ -126,15 +125,11 @@ impl Mapping {
     }
 
     fn set_attr(&self, attr: Attributes) {
-        let mut current = self.attr.get();
-        current.insert(attr);
-        self.attr.set(current);
+        self.attr.write().insert(attr);
     }
 
     fn remove_attr(&self, attr: Attributes) {
-        let mut current = self.attr.get();
-        current.remove(attr);
-        self.attr.set(current);
+        self.attr.write().remove(attr);
     }
 
     pub fn virt_range(&self) -> &VirtualRegion {
@@ -143,7 +138,7 @@ impl Mapping {
 
     #[allow(dead_code)]
     pub fn is_read_only(&self) -> bool {
-        !self.attr.get().contains(Attributes::RW)
+        !self.attr.read().contains(Attributes::RW)
     }
 
     #[allow(dead_code)]
@@ -174,7 +169,7 @@ impl Mapping {
             }
             MappingType::KernelData => {
                 let mut arch_mapper = Mapper::new(self.range.start, pt);
-                let attr = self.attr.get();
+                let attr = self.attr.read();
                 if attr.contains(Attributes::RW) {
                     arch_mapper.map(frame_allocator)?;
                     if self.range.size > 1 {

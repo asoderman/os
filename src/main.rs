@@ -138,7 +138,7 @@ pub fn ap_main() {
 fn panic(info: &PanicInfo) -> ! {
     // Print KERNEL PANIC before even attempting to get core num so we know it's a panic even if we
     // fault in try_apic_id
-    print!("KERNEL PANIC ");
+    write_serial_out("KERNEL PANIC ");
     let core = arch::x86_64::try_apic_id();
     println!("on core {:?}: {}", core, info);
 

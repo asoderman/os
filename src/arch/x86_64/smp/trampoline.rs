@@ -3,7 +3,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
 use x86_64::{PhysAddr, VirtAddr};
 
-use crate::{mm::memory_manager, arch::PAGE_SIZE};
+use crate::{arch::PAGE_SIZE, mm::{kunmap, k_identity_map}};
 
 use lazy_static::lazy_static;
 
@@ -63,7 +63,7 @@ impl Trampoline {
     /// the page specified by a 1 byte start vector.
     fn allocate_low_frame() -> PhysAddr {
         let addr = PhysAddr::new(TRAMPOLINE_LOAD_ADDRESS);
-        memory_manager().k_identity_map(addr).expect("Could not get low memory frame for trampoline");
+        k_identity_map(addr).expect("Could not get low memory frame for trampoline");
         addr
     }
 
@@ -102,7 +102,7 @@ impl Trampoline {
     }
 
     pub fn destroy(self) -> Result<(), ()> {
-        memory_manager().kunmap(VirtAddr::new(self.phys_frame.as_u64())).map_err(|_| ())
+        kunmap(VirtAddr::new(self.phys_frame.as_u64()), 1).map_err(|_| ())
     }
 }
 

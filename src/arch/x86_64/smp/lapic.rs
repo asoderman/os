@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicBool;
 
 use x86_64::{PhysAddr, registers::model_specific::Msr, VirtAddr};
 
-use crate::{mm::memory_manager, arch::x86_64::lapic_timer::LapicTimer};
+use crate::{arch::x86_64::lapic_timer::LapicTimer, mm::{kunmap, kmap_mmio_anywhere}};
 
 use super::{super::pic::PICS, trampoline::Trampoline};
 
@@ -124,7 +124,7 @@ pub struct Lapic {
 
 impl Drop for Lapic {
     fn drop(&mut self) {
-        memory_manager().unmap_region(self.vaddr, 1).unwrap();
+        kunmap(self.vaddr, 1).unwrap();
     }
 }
 
@@ -134,7 +134,7 @@ impl Lapic {
         unsafe {
             let base_phys = PhysAddr::new(*LAPIC_BASE.get_unchecked() as u64);
             if base_phys.as_u64() == u64::max_value() { panic!("LAPIC_BASE not set") }
-            let vaddr = memory_manager().kmap_mmio_anywhere(base_phys, 1).expect("Could not map lapic");
+            let vaddr = kmap_mmio_anywhere(base_phys, 1).expect("Could not map lapic");
             //crate::println!("Mapping lapic to {:?}", vaddr);
             Self {
                 vaddr,

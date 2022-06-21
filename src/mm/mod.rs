@@ -6,8 +6,6 @@ mod region;
 mod vmm;
 
 use crate::arch::{PhysAddr, VirtAddr};
-use crate::env::memory_layout;
-use spin::{Mutex, MutexGuard};
 use vmm::init_vmm;
 
 pub use pmm::phys_to_virt;
@@ -15,99 +13,91 @@ pub use pmm::get_init_heap_section;
 pub use error::MemoryManagerError;
 
 use self::mapping::Mapping;
-use self::pmm::BitMapFrameAllocator;
-use self::vmm::{VirtualMemoryManager, VirtualMemoryError};
-pub use self::vmm::VirtualRegion;
+use self::pmm::physical_memory_manager;
+use self::vmm::{VirtualMemoryError, get_kernel_context_virt};
+
+pub use self::vmm::{VirtualRegion, AddressSpace};
 pub use self::pmm::{write_physical, write_physical_slice, get_phys_as_mut};
-
-use lazy_static::lazy_static;
-
-lazy_static! {
-    static ref MM: Mutex<MemoryManager> = Mutex::new(MemoryManager::new());
-}
 
 type Error = MemoryManagerError;
 
-#[derive(Debug)]
-pub struct MemoryManager {
-    vmm: VirtualMemoryManager,
-    pmm: BitMapFrameAllocator
-
+/// Identity maps a physical page into the address space if it is available
+pub fn identity_map(addr_space: &mut AddressSpace, paddr: PhysAddr) -> Result<(), Error> {
+    let frame = physical_memory_manager().lock().request_frame(paddr)?;
+    assert_eq!(frame, paddr);
+    let mapping = mapping::Mapping::new_identity(frame);
+    addr_space.insert_and_map(mapping, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
 }
 
-impl MemoryManager {
-    fn new() -> Self {
-        MemoryManager {
-            vmm: VirtualMemoryManager::default(),
-            pmm: BitMapFrameAllocator::uninit(),
-        }
-    }
-
-    /// Identity maps a physical page into the virtual address space if it is available
-    pub fn k_identity_map(&mut self, paddr: PhysAddr) -> Result<(), Error> {
-        let frame = self.pmm.request_frame(paddr)?;
-        assert_eq!(frame, paddr);
-        let mapping = mapping::Mapping::new_identity(frame);
-        self.vmm.insert_and_map(mapping, &mut self.pmm)?;
-        Ok(())
-
-    }
-
-    /// Map a writable page into the kernel context
-    pub fn kmap(&mut self, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
-        // TODO: make kernel specific only
-        let region = VirtualRegion::new(vaddr, pages);
-        let mapping = Mapping::new(region);
-        // TODO: error handling
-        self.vmm.insert_and_map(mapping, &mut self.pmm).unwrap();
-        Ok(())
-    }
-
-    pub fn kunmap(&mut self, vaddr: VirtAddr) -> Result<(), VirtualMemoryError> {
-        self.unmap_region(vaddr, 1)
-    }
-
-    pub fn unmap_region(&mut self, vaddr: VirtAddr, size: usize) -> Result<(), VirtualMemoryError> {
-        self.vmm.release_region(vaddr, size, &mut self.pmm)
-    }
-
-    /// Identity map the provided physical address. Does not check if the memory is available for
-    /// use but checks if the memory is within bounds of the entire physical memory
-    pub unsafe fn kmap_identity_mmio(&mut self, paddr: PhysAddr, size: usize) -> Result<(), MemoryManagerError> {
-        self.kmap_mmio(paddr, VirtAddr::new(paddr.as_u64()), size)?;
-
-        Ok(())
-    }
-
-    pub unsafe fn kmap_mmio(&mut self, paddr: PhysAddr, vaddr: VirtAddr, size: usize) -> Result<(), MemoryManagerError> {
-        let region = vmm::VirtualRegion::new(vaddr, size);
-        let mapping = mapping::Mapping::new_mmio(region, paddr);
-        self.vmm.insert_and_map(mapping, &mut self.pmm)?;
-
-        Ok(())
-    }
-
-    pub unsafe fn kmap_mmio_anywhere(&mut self, paddr: PhysAddr, size: usize) -> Result<VirtAddr, MemoryManagerError> {
-        let region = self.vmm.first_available_addr_above(vmm::mmio_area_start(), size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
-        self.kmap_mmio(paddr, region.start, size)?;
-        Ok(region.start)
-    }
-
-    pub fn init_pmm(&mut self, heap_range: (VirtAddr, VirtAddr)) {
-        pmm::init_phys_offset(memory_layout().phys_memory_start.as_u64() as usize);
-        let mem_map = &crate::env::env().memory_map;
-        self.pmm.init(mem_map, heap_range.0, heap_range.1);
-    }
+/// Map the virtual region to any available memory within the provided address space
+pub fn map(addr_space: &mut AddressSpace, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
+    // TODO: make kernel specific only
+    let region = VirtualRegion::new(vaddr, pages);
+    let mapping = Mapping::new(region);
+    addr_space.insert_and_map(mapping, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
 }
 
-/// Locks the global MemoryManager.
-pub fn memory_manager() -> MutexGuard<'static, MemoryManager> {
-    MM.lock()
+/// Map the provided virtual address to the provided physical address.
+///
+/// Caller must guarantee the physical address is valid!
+pub unsafe fn map_mmio(addr_space: &mut AddressSpace, vaddr: VirtAddr, paddr: PhysAddr, size: usize) -> Result<(), Error> {
+    let region = vmm::VirtualRegion::new(vaddr, size);
+    let mapping = mapping::Mapping::new_mmio(region, paddr);
+    addr_space.insert_and_map(mapping, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
+}
+
+/// Unmaps the virtual address range from th address space and returns freed resources to the PMM
+pub fn unmap(addr_space: &mut AddressSpace, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
+    addr_space.release_region(vaddr, pages, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
+}
+
+
+/// Identity maps a physical page into the kernel address space if it is available
+pub fn k_identity_map(paddr: PhysAddr) -> Result<(), Error> {
+    let mut kernel_address_space = get_kernel_context_virt().lock();
+    identity_map(&mut kernel_address_space, paddr)
+}
+
+/// Map any writable page into the kernel address space at the specified address
+pub fn kmap(vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
+    // TODO: verify address is in higher half 
+    //assert!(vaddr.as_u64() >= 0xFFFFFF8000000000);
+    let mut kernel_address_space = get_kernel_context_virt().lock();
+    map(&mut kernel_address_space, vaddr, pages)
+}
+
+/// Unmaps the specified virtual address range from the kernel address space
+pub fn kunmap(vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
+    //assert!(vaddr.as_u64() >= 0xFFFFFF8000000000);
+    let mut kernel_address_space = get_kernel_context_virt().lock();
+    unmap(&mut kernel_address_space, vaddr, pages).map_err(|e| e.into())
+}
+
+/// Identity map the provided physical address. Does not check if the memory is available for
+/// use.
+pub unsafe fn kmap_identity_mmio(paddr: PhysAddr, size: usize) -> Result<(), MemoryManagerError> {
+    kmap_mmio(paddr, VirtAddr::new(paddr.as_u64()), size)
+}
+
+pub unsafe fn kmap_mmio(paddr: PhysAddr, vaddr: VirtAddr, size: usize) -> Result<(), MemoryManagerError> {
+    let mut kernel_address_space = get_kernel_context_virt().lock();
+    map_mmio(&mut kernel_address_space, vaddr, paddr, size)
+}
+
+pub unsafe fn kmap_mmio_anywhere(paddr: PhysAddr, size: usize) -> Result<VirtAddr, MemoryManagerError> {
+    let mut addr_space = get_kernel_context_virt().lock();
+    let region = addr_space.first_available_addr_above(vmm::mmio_area_start(), size).ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
+
+    map_mmio(&mut addr_space, region.start, paddr, size)?;
+
+    Ok(region.start)
 }
 
 pub fn init(heap_range: (VirtAddr, VirtAddr)) {
-    MM.lock().init_pmm(heap_range);
+    pmm::init(heap_range);
+    println!("pmm is init");
     init_vmm();
+    println!("vmm is init");
 }
 
 
@@ -115,98 +105,32 @@ pub fn init(heap_range: (VirtAddr, VirtAddr)) {
 #[derive(Debug)]
 pub struct TempPageGuard(VirtAddr);
 
+/*
 impl Drop for TempPageGuard {
     fn drop(&mut self) {
         MM.lock().kunmap(self.0).unwrap();
     }
 }
+*/
 
 #[cfg(test)]
 mod test {
     use super::*;
 
-    use crate::arch::PAGE_SIZE;
     use crate::arch::x86_64::paging::Mapper;
 
     use super::frame_allocator::FrameAllocator;
     use super::vmm::get_kernel_context_virt;
 
-    #[test_case]
-    fn test_pmm_alloc_and_free() {
-        // Take lock for duration of test
-        let mut mm = MM.lock();
-
-        let starting_frame_count = mm.pmm.free_frames();
-        let frame = mm.pmm.allocate_frame();
-        let frame2 = mm.pmm.allocate_frame();
-        let frame_count_after_alloc = mm.pmm.free_frames();
-
-        mm.pmm.deallocate_frame(frame);
-        mm.pmm.deallocate_frame(frame2);
-        let frame_count_after_free = mm.pmm.free_frames();
-
-        assert_ne!(frame, frame2);
-        assert_ne!(starting_frame_count, frame_count_after_alloc);
-        assert_eq!(starting_frame_count, frame_count_after_free);
-    }
-
-    /// The VMM should not allow caller to reserve a region in use.
-    #[test_case]
-    fn test_vmm_overlap_reject() {
-        let test_region = VirtAddr::new(0);
-        let region_size = 4;
-        let within_test_region = test_region + 0x1000u64;
-        let adjacent_region_start = test_region + region_size as u64 * PAGE_SIZE as u64;
-
-        let mut vmm = super::vmm::VirtualMemoryManager::new();
-
-        assert!(vmm
-            .reserve_region(test_region, region_size)
-            .is_ok());
-        // Assert reservation of same region is rejected
-        assert!(
-            vmm
-                .reserve_region(test_region, region_size)
-                .is_err(),
-            "VMM did not reject already reserved region"
-        );
-        assert!(
-            vmm
-                .reserve_region(test_region, region_size + 1)
-                .is_err(),
-            "VMM did not reject reserved super-region"
-        );
-        assert!(
-            vmm
-                .reserve_region(test_region, 1)
-                .is_err(),
-            "VMM did not reject reserved sub-region"
-        );
-        assert!(
-            vmm
-                .reserve_region(within_test_region, 1)
-                .is_err(),
-            "VMM did not reject reserved sub-region with different starts"
-        );
-        assert!(
-            vmm
-                .reserve_region(within_test_region, region_size)
-                .is_err(),
-            "VMM did not reject overlapping region"
-        );
-
-        assert!(vmm.reserve_region(adjacent_region_start, 1).is_ok(), "unable to reserve adjacent region. incorrect rejection");
-    }
 
     #[test_case]
     fn test_kmap_kunmap() {
         let test_addr = VirtAddr::new(0x10000);
-        // take lock for duration of the test 
-        let mut mm = MM.lock();
+        let test_size = 2;
         // take the free frames before touching any memory
-        let pmm_frames = mm.pmm.free_frames();
+        let pmm_frames = physical_memory_manager().lock().free_frames();
 
-        let kmap_result = mm.kmap(test_addr, 2);
+        let kmap_result = kmap(test_addr, test_size);
         assert!(kmap_result.is_ok());
 
         unsafe { 
@@ -216,15 +140,14 @@ mod test {
             assert!(*(test_addr.as_mut_ptr() as *mut bool).add(0x1000));
         }
 
-
-        let mut test_pt_walker = unsafe {
-            Mapper::new(test_addr, get_kernel_context_virt().unwrap().as_mut())
-        };
-        let kunmap_result = mm.kunmap(test_addr);
+        let kunmap_result = kunmap(test_addr, test_size);
 
         assert!(kunmap_result.is_ok());
 
-        let pmm_frames_after_unmap = mm.pmm.free_frames();
+        let pmm_frames_after_unmap = physical_memory_manager().lock().free_frames();
+
+        let mut kernel_as = get_kernel_context_virt().lock();
+        let mut test_pt_walker = Mapper::new(test_addr, kernel_as.page_table());
 
         test_pt_walker.walk();
         assert!(test_pt_walker.next_entry().is_unused());
