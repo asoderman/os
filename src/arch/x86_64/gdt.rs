@@ -1,5 +1,6 @@
 use spin::Once;
 use x86_64::{structures::gdt::{GlobalDescriptorTable, Descriptor}, registers::segmentation::{CS, Segment, SegmentSelector, SS, DS, ES, GS, FS}, PrivilegeLevel, VirtAddr};
+use x86_64::instructions::tables::load_tss;
 
 use super::smp::thread_local::ProcessorControlBlock;
 
@@ -43,9 +44,11 @@ pub unsafe fn load_kernel_gdt() {
 /// This must be called after thread locals are initialized
 pub unsafe fn load_per_cpu_gdt() {
     GDT.clone_from(&BASE_GDT);
-    GDT.add_entry(Descriptor::tss_segment(&ProcessorControlBlock::get().tss));
+    let tss_selector = GDT.add_entry(Descriptor::tss_segment(&ProcessorControlBlock::get().tss));
 
-    GDT.load()
+    GDT.load();
+
+    load_tss(tss_selector);
 }
 
 pub unsafe fn set_segment_regs() {
