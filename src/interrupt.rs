@@ -20,21 +20,25 @@ pub fn interrupts_enabled() -> bool {
     x86_64::instructions::interrupts::are_enabled()
 }
 
-pub fn enable_interrupts() {
+pub fn enable_interrupts() -> bool {
+    let was = interrupts_enabled();
     #[cfg(target_arch="x86_64")]
     x86_64::instructions::interrupts::enable();
+    was
 }
 
 pub fn disable_interrupts() -> bool {
-    let out = interrupts_enabled();
+    let was = interrupts_enabled();
     #[cfg(target_arch="x86_64")]
     x86_64::instructions::interrupts::disable();
-    out
+    was
 }
 
 pub fn restore_interrupts(should: bool) {
     if should {
-        enable_interrupts()
+        enable_interrupts();
+    } else {
+        disable_interrupts();
     }
 }
 
@@ -44,12 +48,12 @@ pub fn without_interrupts<F: FnOnce()>(f: F) {
     restore_interrupts(was);
 }
 
-/// Halt the CPU. Waits for the next interrupt
+/// Halt the CPU. Waits for the next interrupt. Restores the interrupts to their original state
+/// after
 pub fn enable_and_halt() {
-    enable_interrupts();
-    unsafe {
-        core::arch::asm!("hlt");
-    }
+    let was = enable_interrupts();
+    unsafe { core::arch::asm!("hlt"); }
+    restore_interrupts(was);
 }
 
 pub fn init() -> Result<(), ()> {
