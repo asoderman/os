@@ -10,7 +10,9 @@ use x86_64::{
 
 use crate::mm::phys_to_virt;
 
-const MAX_PAGE_ENTRIES: usize = 511;
+const MAX_PAGE_ENTRIES: usize = 512;
+
+const MAX_PAGE_LEVEL: usize = 4;
 
 pub struct Flusher(VirtAddr);
 
@@ -52,7 +54,7 @@ pub enum MapError {
 /// A struct that manages the state for performing page table walks using the virtual address provided
 pub struct Mapper<'a> {
     addr: VirtAddr,
-    indices: [PageTableIndex; 4],
+    indices: [PageTableIndex; MAX_PAGE_LEVEL],
     current_level: usize,
     current_ptr: NonNull<PageTable>,
     prev_ptrs: Vec<NonNull<PageTable>>,
@@ -115,16 +117,15 @@ impl<'a> Mapper<'a> {
     /// Increases the index for a specific page level e.g. increase the level 2 index because the
     /// level 1 table index exceeded 511
     fn increase_index(&mut self, page_level: usize) -> Result<(), MapError> {
-        let i = u16::from(self.indices[4 - page_level]);
-        let new = i + 1 % 512;
+        let i = u16::from(self.indices[MAX_PAGE_LEVEL - page_level]);
+        let new = i + 1 % MAX_PAGE_ENTRIES as u16;
 
-        self.indices[4 - page_level] = PageTableIndex::new(new);
+        self.indices[MAX_PAGE_LEVEL - page_level] = PageTableIndex::new(new);
 
         Ok(())
     }
 
     /// Get the current PageTable in the walk.
-    #[inline]
     fn current(&mut self) -> &mut PageTable {
         unsafe {
             self.current_ptr.as_mut()
@@ -133,10 +134,8 @@ impl<'a> Mapper<'a> {
 
     /// Get an index for the current pagetable to retrieve the pagetable entry containing the next
     /// table.
-    #[inline]
     fn next_index(&self) -> PageTableIndex {
-        // TODO: PML5 support
-        self.indices[4 - self.current_level]
+        self.indices[MAX_PAGE_LEVEL - self.current_level]
     }
 
     /// Mutably borrow the entry in the current table that corresponds to the next table.
@@ -203,8 +202,8 @@ impl<'a> Mapper<'a> {
 
     /// Unmaps a range of frames
     ///
-    /// Flushes the unmapped address fromt he TLB
-    pub fn unmap(&mut self, _count: usize, frame_allocator: &mut impl FrameAllocator, cleanup: bool) -> Result<PhysAddr, MapError> {
+    /// Flushes the unmapped address from the TLB
+    pub fn unmap(&mut self, frame_allocator: &mut impl FrameAllocator, cleanup: bool) -> Result<PhysAddr, MapError> {
         loop {
             match self.advance() {
                 Err(MapError::BottomLevel) => break,
@@ -225,11 +224,6 @@ impl<'a> Mapper<'a> {
 
                     frame_allocator.deallocate_frame(self.unmap_next()?);
 
-                    /*
-                    if !self.current_is_empty() {
-                        println!("Remaining entries: {:?}", self.entries_used_by_current());
-                    }
-                    */
                 } else {
                     break;
                 }
@@ -238,6 +232,27 @@ impl<'a> Mapper<'a> {
 
         x86_64::instructions::tlb::flush(self.addr);
         Ok(frame)
+    }
+
+    /// Sets the flags for each page table entry of the specified address.
+    ///
+    /// # Safety:
+    /// Do not attempt to set the huge page flag via this method
+    pub fn set_flags(&mut self, flags: PageTableFlags) -> Result<Flusher, MapError> {
+        loop {
+            if !self.next_entry().is_unused() {
+                // Always bitor with PRESENT since it should never be cleared while setting flags
+                // anyway
+                self.next_entry().set_flags(flags | PageTableFlags::PRESENT);
+                match self.advance() {
+                    Err(MapError::NotPresent) => { unreachable!() },
+                    Err(MapError::BottomLevel) => { return Ok(Flusher(self.addr)) },
+                    _ => (),
+                }
+            } else {
+                return Err(MapError::NotPresent)
+            }
+        }
     }
 
     fn current_is_empty(&mut self) -> bool {
@@ -251,9 +266,6 @@ impl<'a> Mapper<'a> {
 
     /// Map the pages that are adjacent to the address provided.
     pub fn map_adjacent(&mut self, pages: usize, mm: &mut impl FrameAllocator) {
-        // TODO: this function will not work across page table boundaries. e.g. if
-        // l1_pagetable[511] is mapped it will attempt to map l1_pagetable[512] and presumably
-        // crash
         if self.current_level != 1 { return; }
         let l1_index = usize::from(self.indices.last().unwrap().clone());
         let range_end = l1_index + pages;
@@ -261,21 +273,21 @@ impl<'a> Mapper<'a> {
         let map_range = (l1_index..(range_end)).skip(1);
 
         // If we need multiple l2_pages
-        if range_end > MAX_PAGE_ENTRIES {
-            let _next_l2_end = range_end % 512;
+        if range_end >= MAX_PAGE_ENTRIES {
+            let _next_l2_end = range_end % MAX_PAGE_ENTRIES;
         }
 
         for i in map_range {
             let frame = mm.allocate_frame();
             // if we cross a page table boundary
-            if i % 512 == 0 && i != 0 {
+            if i % MAX_PAGE_ENTRIES == 0 && i != 0 {
                 self.ascend().unwrap();
                 self.increase_index(2).unwrap();
                 self.map_next(mm).unwrap();
                 self.advance().unwrap();
             }
             // TODO: remove hardcoded flags
-            self.current()[i % 512].set_addr(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
+            self.current()[i % MAX_PAGE_ENTRIES].set_addr(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
         }
     }
 }
