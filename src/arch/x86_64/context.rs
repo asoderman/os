@@ -2,7 +2,11 @@ use core::arch::asm;
 use memoffset::offset_of;
 use x86_64::{PhysAddr, VirtAddr};
 
+use x86_64::registers::rflags::RFlags;
+
 use crate::proc::switch_hook;
+
+use super::gdt::USER_DS_INDEX;
 
 #[derive(Debug, Default, Clone)]
 #[repr(C)]
@@ -43,6 +47,69 @@ impl Context {
     pub unsafe fn switch(&mut self, next: &mut Self) {
         switch(self, next)
     }
+}
+
+/// Enters userspace via sysret
+pub extern "C" fn enter_user() -> ! {
+    crate::interrupt::disable_interrupts();
+    let entry;
+    let ss: usize;
+    let stack;
+    let flags = RFlags::INTERRUPT_FLAG.bits() as usize;
+    {
+        let current = crate::proc::process_list().current();
+
+        entry = current.read().entry_point.as_u64() as usize;
+        stack = current.read().user_stack.as_ref().unwrap().rsp().as_u64() as usize;
+        ss = ((USER_DS_INDEX.get().copied().unwrap() as usize) << 3) | 3;
+    }
+
+    unsafe {
+        user(entry, flags, stack, ss);
+    }
+}
+
+/// Sysret to ring 3
+#[naked]
+unsafe extern "C" fn user(_entry: usize, _flags: usize, _rsp: usize, _data_sel: usize) -> ! {
+    asm!(concat!("
+        swapgs
+
+        mov r15, rcx
+        mov ds, r15d
+        mov es, r15d
+        mov fs, r15d
+        mov gs, r15d
+
+        //push rcx
+        //push rdx
+        //push rsi
+        //push r8
+        //push rdi
+
+        mov r11, rsi
+        mov rcx, rdi
+        mov rsp, rdx
+
+        xor rax, rax
+        xor rbx, rbx
+        xor rdx, rdx
+        xor rsi, rsi
+        xor r8, r8
+        xor r9, r9
+        xor r10, r10
+        xor r12, r12
+        xor r13, r13
+        xor r14, r14
+        xor r15, r15
+
+        //iretq
+
+        sysretq
+        ",
+        ),
+        options(noreturn)
+        )
 }
 
 #[naked]

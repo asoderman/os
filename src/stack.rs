@@ -17,6 +17,25 @@ const KERNEL_STACK_SIZE: usize = 4;
 const KERNEL_STACK_SIZE_BYTES: usize = KERNEL_STACK_SIZE * PAGE_SIZE;
 
 #[derive(Debug)]
+pub struct UserStack {
+    base: VirtAddr,
+    pages: usize
+}
+
+impl UserStack {
+    pub fn new(base: VirtAddr, size: usize) -> Self {
+        Self {
+            base,
+            pages: size
+        }
+    }
+
+    pub fn rsp(&self) -> VirtAddr {
+        self.base + (self.pages * PAGE_SIZE) as u64
+    }
+}
+
+#[derive(Debug)]
 pub struct KernelStack {
     base: VirtAddr,
     pages: usize

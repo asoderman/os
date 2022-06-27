@@ -107,7 +107,7 @@ impl Log for SerialRef {
                 Level::Trace => { Color::Cyan(&level) }
             };
 
-            println!("[{}]: {}", c_level, record.args());
+            println!("[{}:{}]: {}", crate::proc::try_pid().unwrap_or(0), c_level, record.args());
         }
     }
 

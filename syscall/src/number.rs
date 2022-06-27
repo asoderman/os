@@ -15,3 +15,4 @@ syscall_number!(HELLO_WORLD, 0);
 syscall_number!(SLEEP, 1);
 syscall_number!(YIELD, 2);
 syscall_number!(EXIT, 3);
+syscall_number!(LOGPRINT, 4);

@@ -1,16 +1,17 @@
 use x86_64::structures::idt::InterruptStackFrame;
 
-mod handlers;
+use crate::info;
+
+pub mod handlers;
 pub mod number;
 
-fn no_op_isr(frame: InterruptStackFrame, index: u8, error_code: Option<u64>) {
-    println!("Dummy ISR {:#X} e: {:#X?}: \n {:#?}", index, error_code, frame);
+fn unhandled_interrupt(frame: InterruptStackFrame, index: u8, error_code: Option<u64>) {
+    panic!("Dummy ISR {:#X} e: {:#X?}: \n {:#?}", index, error_code, frame);
 }
 
 pub fn eoi() {
     #[cfg(target_arch="x86_64")]
     {
-        // TODO: this maps the lapic on every call. FIX THIS!!!
         crate::arch::x86_64::smp::lapic::Lapic::new().eoi();
     }
 }
@@ -61,8 +62,8 @@ pub fn init() -> Result<(), ()> {
     {
         let idt = crate::arch::x86_64::idt::get_idt_mut().ok_or(())?;
 
-        x86_64::set_general_handler!(idt, no_op_isr);
-        println!("Noop handlers installed");
+        x86_64::set_general_handler!(idt, unhandled_interrupt);
+        info!("Installed `unhandled_interrupt` handler");
 
         handlers::install_handlers();
     }

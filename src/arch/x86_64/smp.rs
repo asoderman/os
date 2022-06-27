@@ -15,6 +15,9 @@ pub use cpulist::cpu_list;
 
 static CORES: Once<usize> = Once::new();
 
+static IS_INIT: Once = Once::new();
+
+
 #[derive(Debug, Default)]
 pub struct CpuLocals {
     pub lapic_id: usize,
@@ -136,6 +139,8 @@ pub fn init_smp() -> Result<(), SmpError> {
 
     trampoline.destroy().unwrap();
 
+    IS_INIT.call_once(|| ());
+
     Ok(())
 }
 
@@ -169,6 +174,10 @@ pub(super) fn init_smp_ap(lapic_id: usize) {
 
 pub fn this_core<'c>() -> RwLockReadGuard<'c, Core> {
     cpu_list()[CpuLocals::get().lapic_id].read()
+}
+
+pub fn is_init() -> bool {
+    IS_INIT.is_completed()
 }
 
 /// Gets the smp core count

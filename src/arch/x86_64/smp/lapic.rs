@@ -37,7 +37,10 @@ static ENABLE_APIC_MSR: Once = Once::new();
 static PIC_DISABLED: AtomicBool = AtomicBool::new(false);
 
 /// The Lapic base read from the madt
-pub static mut LAPIC_BASE: Once<usize> = Once::new();
+pub static LAPIC_BASE: Once<usize> = Once::new();
+
+/// The kernel mapping to acces the LAPIC (which is core local) once all the aps are booted
+static LAPIC_PTR: Once<VirtAddr> = Once::new();
 
 bitfield! {
     /// The interrupt command register for the LAPIC
@@ -124,22 +127,31 @@ pub struct Lapic {
 
 impl Drop for Lapic {
     fn drop(&mut self) {
-        kunmap(self.vaddr, 1).unwrap();
+        if !super::IS_INIT.is_completed() {
+            kunmap(self.vaddr, 1).unwrap();
+        }
     }
 }
 
 impl Lapic {
     /// Create an interface to the local apic and map the registers into memory.
     pub fn new() -> Self {
-        unsafe {
-            let base_phys = PhysAddr::new(*LAPIC_BASE.get_unchecked() as u64);
-            if base_phys.as_u64() == u64::max_value() { panic!("LAPIC_BASE not set") }
-            let vaddr = kmap_mmio_anywhere(base_phys, 1).expect("Could not map lapic");
-            //crate::println!("Mapping lapic to {:?}", vaddr);
-            Self {
-                vaddr,
-                x2: false,
+        let base_phys = PhysAddr::new(*LAPIC_BASE.get().unwrap() as u64);
+        // TODO: test single lapic mapping in SMP
+        let vaddr = if let Some(addr) = LAPIC_PTR.get().copied() { addr } else {
+            unsafe {
+                let vaddr = kmap_mmio_anywhere(base_phys, 1)
+                    .expect("Could not map lapic");
+                log::trace!("Mapping lapic to {:?}", vaddr);
+                if super::IS_INIT.is_completed() {
+                    LAPIC_PTR.call_once(||vaddr);
+                }
+                vaddr
             }
+        };
+        Self {
+            vaddr,
+            x2: false,
         }
     }
 
@@ -366,9 +378,7 @@ impl Lapic {
 
 /// Set the LAPIC base read from the MADT. This physical address is used to map the lapic via MMIO
 pub(super) fn set_base(addr: PhysAddr) {
-    unsafe {
-        LAPIC_BASE.call_once(|| addr.as_u64() as usize);
-    }
+    LAPIC_BASE.call_once(|| addr.as_u64() as usize);
 }
 
 fn disable_pic() {

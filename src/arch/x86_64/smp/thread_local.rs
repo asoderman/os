@@ -19,18 +19,32 @@ const KERNEL_GS_BASE_MSR: u32 = 0xC0000102;
 
 /// Writes to the fs_base MSR
 unsafe fn set_fs_base(addr: usize) {
-    crate::println!("set fs base: {:X}", addr);
     Msr::new(FS_BASE_MSR).write(addr as u64);
 }
 
+/// Writes to the gs_base MSR
 unsafe fn set_kernel_gs_base(addr: usize) {
     Msr::new(GS_BASE_MSR).write(addr as u64);
+}
+
+pub unsafe fn set_fs_base_to_gs_base() {
+    let fsbase = Msr::new(FS_BASE_MSR).read();
+    let mut pcb = ProcessorControlBlock::get();
+    pcb.tmp_user_fs_base = fsbase as usize;
+    let addr = Msr::new(GS_BASE_MSR).read();
+    set_fs_base(addr as usize);
+}
+
+pub unsafe fn restore_fs_base() {
+    let fs = ProcessorControlBlock::get().tmp_user_fs_base;
+    set_fs_base(fs);
 }
 
 #[repr(C)]
 pub struct ProcessorControlBlock {
     pub tls_self_ptr: usize,
     pub tmp_user_rsp: usize,
+    pub tmp_user_fs_base: usize,
     pub tss: TaskStateSegment
 }
 
@@ -38,8 +52,8 @@ impl ProcessorControlBlock {
     /// Gets the thread local ProcessorControlBlock
     pub fn get() -> &'static mut Self {
         unsafe {
-            let fs = Msr::new(FS_BASE_MSR).read();
-            (fs as *mut Self).as_mut().expect("Tried to access ProcessorControlBlock before thread local init")
+            let gs = Msr::new(GS_BASE_MSR).read();
+            (gs as *mut Self).as_mut().expect("Tried to access ProcessorControlBlock before thread local init")
         }
     }
 }

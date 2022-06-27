@@ -1,3 +1,7 @@
 uefi_boot_partition
 target
 log.txt
+*.DS_Store
+*.o
+*.elf
+*.a

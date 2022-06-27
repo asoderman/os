@@ -6,11 +6,14 @@ use alloc::sync::Arc;
 use alloc::collections::BTreeMap;
 
 use lazy_static::lazy_static;
+use log::{info, trace};
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use crate::interrupt::{enable_and_halt, disable_interrupts, without_interrupts};
+use crate::arch::x86_64::context::enter_user;
+use crate::elf::Loader;
+use crate::interrupt::{enable_and_halt, disable_interrupts, without_interrupts, restore_interrupts};
 use crate::mm::AddressSpace;
-use crate::stack::KernelStack;
+use crate::stack::{KernelStack, UserStack};
 use crate::time::{Seconds, Time};
 use crate::arch::{{Context, VirtAddr}, x86_64::apic_id, x86_64::set_tss_rsp0};
 
@@ -27,6 +30,8 @@ static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[thread_local]
 pub static TICKS_ELAPSED: AtomicUsize = AtomicUsize::new(0);
+
+pub static PANIC: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 pub enum SchedulerError {
@@ -55,7 +60,9 @@ impl ProcessList {
             core_id: None,
             address_space: None,
             parent: None,
-            kstack: None,
+            _kstack: None,
+            user_stack: None,
+            entry_point: VirtAddr::new(0),
 
             status: Status::NotRunnable,
 
@@ -93,6 +100,7 @@ impl ProcessList {
 
     /// Update the states of all processes in the list. Assigns a core to run on if needed
     fn update_all(&self) {
+        let now = Time::now();
         for (pid, proc) in self.list.iter() {
             if proc.read().core_id.is_none() && *pid != 0 {
                 proc.write().core_id = Some(apic_id() as usize)
@@ -104,7 +112,6 @@ impl ProcessList {
                 Status::Blocked(blocker) => {
                     match blocker {
                         Wake::Time(end) => {
-                            let now = Time::now();
                             if now >= end {
                                 proc.write().status = Status::Ready;
                             }
@@ -163,9 +170,12 @@ pub struct Task {
     pub id: usize,
     pub parent: Option<usize>,
     pub core_id: Option<usize>,
-    #[allow(unused)]
-    address_space: Option<Box<AddressSpace>>,
-    kstack: Option<KernelStack>,
+    pub address_space: Option<Box<AddressSpace>>,
+    _kstack: Option<KernelStack>,
+
+    pub user_stack: Option<UserStack>,
+    pub entry_point: VirtAddr,
+
     status: Status,
     arch_context: Context,
 }
@@ -182,13 +192,17 @@ impl Task {
 
         context.set_cr3(address_space.phys_addr());
 
+        info!("New task {} created", id);
 
         Arc::new(RwLock::new(Task {
             id,
             core_id: None,
             parent: Some(pid()),
             address_space: Some(address_space),
-            kstack: Some(stack),
+            _kstack: Some(stack),
+            user_stack: None,
+
+            entry_point,
             status: Status::Ready,
             arch_context: context
         }))
@@ -224,6 +238,7 @@ impl Task {
     pub fn sleep_for(&mut self, seconds: usize) {
         let now = Time::now();
         let end = now + Seconds(seconds);
+        info!("{} sleeping until {}", self.id, end);
         assert!(end > now, "now: {:#?}\nend: {:#?}", now, end);
 
         self.status = Status::Blocked(Wake::Time(end));
@@ -245,25 +260,47 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         without_interrupts(|| {
-            println!("Task {}, died!", self.id);
+            info!("Task {}, died!", self.id);
         });
     }
 }
 
+#[track_caller]
 pub fn process_list<'l>() -> RwLockReadGuard<'l, ProcessList> {
+    assert!(!crate::interrupt::interrupts_enabled());
     PROCESS_LIST.read()
 }
 
 pub fn process_list_mut<'l>() -> RwLockWriteGuard<'l, ProcessList> {
+    trace!("Taking proc list write lock");
+    assert!(!crate::interrupt::interrupts_enabled());
     PROCESS_LIST.write()
+}
+
+static TEST_ELF: &[u8] = include_bytes!("../target/userspace/test_user");
+
+extern "C" fn load_elf() {
+    process_list().current().write().load_elf(TEST_ELF).unwrap();
+}
+
+pub fn new_user_test() {
+    let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
+    task.write().arch_context.push(load_elf as usize);
+
+    process_list_mut().insert(task).unwrap();
 }
 
 pub fn pid() -> usize {
     CURRENT_PROC.load(Ordering::Acquire)
 }
 
+pub fn try_pid() -> Option<usize> {
+    crate::arch::x86_64::smp::is_init().then(|| pid())
+}
+
 /// Yield on the current process. Will attempt to schedule another process
 pub fn yield_time() {
+    let was = disable_interrupts();
     let did_switch: bool;
     unsafe {
         // Try to find something else to run. But if we can't, just wait for a new process
@@ -271,8 +308,8 @@ pub fn yield_time() {
     }
 
     if !did_switch {
+        trace!("Waiting to switch");
         loop {
-            disable_interrupts();
             let blocked = process_list().current().read().blocked();
             let dying = process_list().current().read().dying();
 
@@ -284,16 +321,17 @@ pub fn yield_time() {
                 enable_and_halt();
             }
         }
+        trace!("leaving yield");
     }
+    restore_interrupts(was);
 }
 
 pub fn exit(_status: usize) {
-    let current = process_list().current();
+    {
+        let current = process_list().current();
 
-    // TODO: do resource cleanup
-    current.write().status = Status::Dying;
-
-    drop(current);
+        current.write().status = Status::Dying;
+    }
 
     yield_time();
 }
@@ -303,7 +341,7 @@ pub fn exit(_status: usize) {
 /// # Returns 
 /// If the process was switched
 pub unsafe fn switch_next() -> bool {
-    while PROC_SWITCH_LOCK.compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::Relaxed).is_err() {}
+    while PROC_SWITCH_LOCK.compare_exchange_weak(false, true, Ordering::Release, Ordering::Relaxed).is_err() {}
     let current = process_list().current();
 
     process_list().update_all();
@@ -311,11 +349,14 @@ pub unsafe fn switch_next() -> bool {
     let next = process_list().get_next();
 
     if let Some(next) = next {
+        trace!("process switch {} -> {}", current.read().id, next.read().id);
         SWITCH_PTRS = Some((current.clone(), next.clone()));
 
-        TICKS_ELAPSED.store(0, Ordering::SeqCst);
+        TICKS_ELAPSED.store(0, Ordering::Release);
+        trace!("ticks reset");
 
         set_tss_rsp0(next.read().arch_context.rsp());
+        trace!("tss updated");
         // Do switch
         let current_ptr = current.as_mut_ptr();
         let next_ptr = next.as_mut_ptr();
@@ -326,18 +367,20 @@ pub unsafe fn switch_next() -> bool {
 
         true
     } else {
-        PROC_SWITCH_LOCK.store(false, Ordering::SeqCst);
+        PROC_SWITCH_LOCK.store(false, Ordering::Release);
         false
     }
 }
 
 pub extern "C" fn switch_hook(_old: &mut Context, _current: &mut Context) {
     if let Some(procs) = unsafe { SWITCH_PTRS.take() } {
-        let old_pid = procs.0.read().id;
         let dying = procs.0.read().dying();
         if dying {
-            println!("removed: {:?}", process_list_mut().remove(old_pid));
+            let old_pid = procs.0.read().id;
+            trace!("Pid {} dying", old_pid);
+            process_list_mut().remove(old_pid);
         }
     }
-    crate::proc::PROC_SWITCH_LOCK.store(false, core::sync::atomic::Ordering::SeqCst);
+    crate::proc::PROC_SWITCH_LOCK.store(false, core::sync::atomic::Ordering::Release);
+    trace!("switch success");
 }

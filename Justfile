@@ -23,10 +23,15 @@ OVMF_DIR := if os() == "linux" { OVMF_DIR_linux } else { OVMF_DIR_macos }
 #cargo_output := "{{build_dir}}{{bin}}"
 uefi_target := join(output_dir, "kernel/kernel.elf")
 
-# The base build is configured by cargo so just delegate to cargo
+userspace_c :=  "userspace/c"
+userspace := "userspace"
+userspace_target := "target/userspace"
+
+# cargo build
 build:
     cargo build
 
+# cargo test
 test:
     cargo test
 
@@ -54,8 +59,8 @@ graphics_flag := if graphics == "false" {
 debug := "false" 
 debug_flags := if debug != "false" { "-s -S" } else { "" }
 
-# TODO: handle other exit statuses so tests can properly fail
 qemu *FLAGS:
+    ## TODO: handle other exit statuses so tests can properly fail
     -qemu-system-x86_64 \
         -bios \
         {{OVMF_DIR}} \
@@ -89,3 +94,54 @@ install_ovmf:
     # Next rename and move the file into a safe place
     sudo mkdir -p {{OVMF_DIR}}
     sudo cp -r usr/share/edk2.git/ovmf-x64/OVMF_CODE-pure-efi.fd {{OVMF_DIR}}
+
+# NOTE: Before running this build change the crate-type Cargo.toml from "lib" to
+# "staticlib" then revert the change afterwards otherwise the kernel won't build!
+# Build the syscall library as a static library for non rust programs. SEE NOTE in Justfile
+build_libsyscall_static:
+    cd syscall && cargo build \
+    --features staticlib \
+    --release \
+    --target ../x86_64-bare.json
+
+    cd syscall && cbindgen \
+    --config cbindgen.toml \
+    --crate syscall \
+    --output syscall.h \
+    --lang c
+
+    -mkdir userspace/c/include
+
+    cp syscall/syscall.h userspace/c/include/syscall.h
+
+
+# Compile a C program and link it against the syscall library
+cc FILE:
+    just build_libsyscall_static
+    clang \
+    -target x86_64-linux-elf \
+    -c {{FILE}} \
+    -o {{without_extension(FILE)}}.o \
+    -ffreestanding \
+    -nostartfiles \
+    -nodefaultlibs
+
+    -mkdir target/userspace
+
+    ld.lld \
+    -o target/userspace/{{file_name(without_extension(FILE))}} \
+    {{without_extension(FILE)}}.o \
+    -L -l syscall/target/x86_64-bare/release/libsyscall.a \
+    -e main \
+    # -T linker.ld
+
+    @echo "\n\nC file compiled to target/userspace/{{file_name(without_extension(FILE))}}.elf"
+
+
+
+# Build userspace
+userspace:
+    for c_file in `ls {{userspace_c}} | grep "\.c"`; \
+    do just cc "{{userspace_c}}/$c_file"; \
+    done
+

@@ -1,5 +1,5 @@
 use spin::RwLock;
-use x86_64::{structures::paging::PageTable, VirtAddr};
+use x86_64::{structures::paging::{PageTable, PageTableFlags}, VirtAddr};
 
 use super::{vmm::{VirtualRegion, VirtualMemoryError}, frame_allocator::FrameAllocator};
 use crate::arch::{PhysAddr, x86_64::paging::{Mapper, MapError}, PAGE_SIZE};
@@ -90,7 +90,7 @@ impl Mapping {
     }
 
     /// Create a new a empty mapping to represent a region. This is used for lookup and cannot be
-    /// mapped. It must maintain `NO_UNMAP` so it does not get caught by the drop check.
+    /// mapped.
     pub(super) fn new_empty(range: VirtualRegion) -> Self {
         Mapping {
             range,
@@ -159,6 +159,13 @@ impl Mapping {
         self.set_attr(Attributes::READ | Attributes::EX);
     }
 
+    pub fn mark_as_userspace(&self, pt: &mut PageTable) {
+        for p in self.range.pages() {
+            let mut mapper = Mapper::new(p, pt);
+            mapper.set_flags(PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE).unwrap();
+        }
+    }
+
     /// Map the pages to the provided frames
     pub fn map(&mut self, pt: &mut PageTable, frame_allocator: &mut impl FrameAllocator) -> Result<(), MapError> {
         match self.kind {
@@ -198,7 +205,7 @@ impl Mapping {
         for (_i, page) in self.range.pages().into_iter().enumerate() {
             let mut walker = Mapper::new(page, pt);
 
-            let frame = walker.unmap(1, frame_allocator, cleanup).unwrap();//.map_err(|_| VirtualMemoryError::UnmapNonPresent)?;
+            let frame = walker.unmap(frame_allocator, cleanup).unwrap();//.map_err(|_| VirtualMemoryError::UnmapNonPresent)?;
             match self.kind {
                 // Dont return a MMIO frame to pmm because it can't be used like normal memory
                 MappingType::MMIO(_) => (),

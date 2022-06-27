@@ -1,7 +1,8 @@
 use core::arch::asm;
 
-use x86_64::VirtAddr;
+use x86_64::{VirtAddr, PrivilegeLevel};
 use x86_64::registers::model_specific::{LStar, Efer, EferFlags, Star, SFMask};
+use x86_64::registers::segmentation::SegmentSelector;
 use x86_64::structures::tss::TaskStateSegment;
 
 use memoffset::offset_of;
@@ -16,22 +17,27 @@ const RFLAGS_MASK: u64 = 0x300;
 /// Enables the usage of the `syscall` and `sysret` instructions and installs the syscall receiver
 pub(super) fn init_syscall() {
     unsafe {
-        // Enable syscall instruction
-        let mut efer = Efer::read();
-        efer.set(EferFlags::SYSTEM_CALL_EXTENSIONS, true);
-        Efer::write(efer);
+        let syscall_cs_ss_selector = SegmentSelector::new(*gdt::KERNEL_CS_INDEX.get().unwrap(), PrivilegeLevel::Ring0);
 
-        let syscall_cs_ss_selector = (*gdt::KERNEL_CS_INDEX.get().unwrap()) << 3;
-        let sysret_cs_ss_selector = (*gdt::USER_CS_INDEX.get().unwrap() << 3) | 3;
-        Star::write_raw(sysret_cs_ss_selector, syscall_cs_ss_selector);
+        let kernel_tls_selector = SegmentSelector::new(*gdt::KERNEL_TLS_INDEX.get_unchecked(), PrivilegeLevel::Ring3);
+
+        // Set sysret cs/ss selector to kernel tls because when sysret is executed for 64bit code
+        // the cpu loads [Star entry + 8] for ss and [Star entry + 16] for cs
+        // The gdt must be ordered kernel tls -> user data -> user code 64 for this to work
+        Star::write_raw(kernel_tls_selector.0, syscall_cs_ss_selector.0);
 
         // Allow because we are writing to the register but not modifying the const
         #[allow(const_item_mutation)]
         SFMask::MSR.write(RFLAGS_MASK);
-    }
 
-    // install syscall receiver
-    LStar::write(VirtAddr::new(syscall_receiver as u64));
+        // install syscall receiver
+        LStar::write(VirtAddr::new(syscall_receiver as u64));
+
+        // Enable syscall instruction
+        let mut efer = Efer::read();
+        efer.set(EferFlags::SYSTEM_CALL_EXTENSIONS, true);
+        Efer::write(efer);
+    }
 }
 
 /// This is the asm entry point of the `syscall` instruction. This sets us up in a state where the
@@ -102,20 +108,37 @@ unsafe extern "C" fn syscall_receiver() {
         ),
         tmp_user_stack = const(offset_of!(ProcessorControlBlock, tmp_user_rsp)),
         tss_rsp0 = const(offset_of!(ProcessorControlBlock, tss) + offset_of!(TaskStateSegment, privilege_stack_table)),
-        ss_sel = const(0),
-        cs_sel = const(0),
+        ss_sel = const(0x23),
+        cs_sel = const(0x2b),
         options(noreturn)
         );
 }
 
+/// Syscall ABI 
+///
+/// a: rax
+/// b: rdi
+/// c: rsi
+/// d: rdx
+/// e: r8
+/// f: r9
+///
 #[no_mangle]
 pub extern "C" fn __inner_receiver(stack: &mut InterruptStack) {
+    // Allow us to use threadlocals again
+    // TODO: gsbase only
+    unsafe {
+        super::smp::thread_local::set_fs_base_to_gs_base();
+    }
     stack.scratch.rax = crate::syscall::syscall(
         stack.scratch.rax, 
-        stack.preserved.rbx,
-        stack.scratch.rcx,
-        stack.scratch.rdx,
-        stack.scratch.rsi,
         stack.scratch.rdi,
+        stack.scratch.rsi,
+        stack.scratch.rdx,
+        stack.scratch.r8,
+        stack.scratch.r9,
     );
+    unsafe {
+        super::smp::thread_local::restore_fs_base();
+    }
 }

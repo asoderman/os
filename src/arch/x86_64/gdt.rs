@@ -11,7 +11,7 @@ static mut GDT: GlobalDescriptorTable = GlobalDescriptorTable::new();
 
 pub static KERNEL_CS_INDEX: Once<u16> = Once::new();
 pub static KERNEL_DS_INDEX: Once<u16> = Once::new();
-static KERNEL_TLS_INDEX: Once<u16> = Once::new();
+pub static KERNEL_TLS_INDEX: Once<u16> = Once::new();
 pub static USER_CS_INDEX: Once<u16> = Once::new();
 pub static USER_DS_INDEX: Once<u16> = Once::new();
 
@@ -21,14 +21,15 @@ pub fn init_base_gdt() {
         let kernel_cs = BASE_GDT.add_entry(Descriptor::kernel_code_segment());
         let kernel_ds = BASE_GDT.add_entry(Descriptor::kernel_data_segment());
         let kernel_tls = BASE_GDT.add_entry(Descriptor::kernel_data_segment());
-        let user_cs = BASE_GDT.add_entry(Descriptor::user_code_segment());
         let user_ds = BASE_GDT.add_entry(Descriptor::user_data_segment());
+        let user_cs = BASE_GDT.add_entry(Descriptor::user_code_segment());
 
-        KERNEL_CS_INDEX.call_once(|| kernel_cs.index());
+
+        KERNEL_CS_INDEX.call_once(||kernel_cs.index());
         KERNEL_DS_INDEX.call_once(||kernel_ds.index());
         KERNEL_TLS_INDEX.call_once(||kernel_tls.index());
         USER_CS_INDEX.call_once(||user_cs.index());
-        USER_DS_INDEX.call_once(|| user_ds.index());
+        USER_DS_INDEX.call_once(||user_ds.index());
     }
 }
 
@@ -55,7 +56,7 @@ pub unsafe fn set_segment_regs() {
     CS::set_reg(SegmentSelector::new(*KERNEL_CS_INDEX.get_unchecked(), PrivilegeLevel::Ring0));
     SS::set_reg(SegmentSelector::new(*KERNEL_DS_INDEX.get_unchecked(), PrivilegeLevel::Ring0));
     DS::set_reg(SegmentSelector::new(*KERNEL_DS_INDEX.get_unchecked(), PrivilegeLevel::Ring0));
-    ES::set_reg(SegmentSelector::new(0, PrivilegeLevel::Ring0));
+    ES::set_reg(SegmentSelector::new(*KERNEL_DS_INDEX.get_unchecked(), PrivilegeLevel::Ring0));
     GS::set_reg(SegmentSelector::new(*KERNEL_TLS_INDEX.get_unchecked(), PrivilegeLevel::Ring0));
     FS::set_reg(SegmentSelector::new(*KERNEL_TLS_INDEX.get_unchecked(), PrivilegeLevel::Ring0));
 }

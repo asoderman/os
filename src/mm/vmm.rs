@@ -106,6 +106,20 @@ pub struct AddressSpace {
     mappings: BTreeSet<Arc<Mapping>>,
 }
 
+impl Drop for AddressSpace {
+    fn drop(&mut self) {
+        // Remove all mappings from the user address space and attempt to unmap them if we own the
+        // sole reference
+        crate::interrupt::without_interrupts(|| {
+            while let Some(m) = self.mappings.pop_first() {
+                if let Ok(mapping) = Arc::try_unwrap(m) {
+                    mapping.unmap(self.page_table(), &mut *physical_memory_manager().lock(), true).unwrap();
+                }
+            }
+        });
+    }
+}
+
 impl Clone for AddressSpace {
     /// Clones the top most page table and the set of all mappings. Does not clone each subsequent
     /// page table.
@@ -154,14 +168,15 @@ impl AddressSpace {
         virt_to_phys(VirtAddr::new(self.page_table.as_ptr() as u64))
     }
 
-    pub(super) fn insert_and_map(&mut self, mut mapping: Mapping, frame_allocator: &mut impl FrameAllocator) -> Result<(), Error> {
+    pub(super) fn insert_and_map(&mut self, mut mapping: Mapping, frame_allocator: &mut impl FrameAllocator) -> Result<Arc<Mapping>, Error> {
         // FIXME: Should throw an error if attempting to overwrite
         mapping.map(self.page_table(), frame_allocator).unwrap();
         self.insert_mapping(mapping)
     }
 
-    pub(super) fn insert_mapping(&mut self, mapping: Mapping) -> Result<(), Error> {
-        self.mappings.insert(Arc::new(mapping)).then_some(()).ok_or(VirtualMemoryError::RegionInUse(""))
+    pub(super) fn insert_mapping(&mut self, mapping: Mapping) -> Result<Arc<Mapping>, Error> {
+        let arc_mapping = Arc::new(mapping);
+        self.mappings.insert(arc_mapping.clone()).then_some(arc_mapping).ok_or(VirtualMemoryError::RegionInUse(""))
     }
 
     /// Removes and unmaps the region containing the region provided as arguments

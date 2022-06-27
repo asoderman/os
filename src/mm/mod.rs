@@ -6,6 +6,9 @@ mod region;
 mod vmm;
 
 use crate::arch::{PhysAddr, VirtAddr};
+use crate::proc::Task;
+use alloc::sync::Arc;
+use log::trace;
 use vmm::init_vmm;
 
 pub use pmm::phys_to_virt;
@@ -21,8 +24,10 @@ pub use self::pmm::{write_physical, write_physical_slice, get_phys_as_mut};
 
 type Error = MemoryManagerError;
 
+type MapHandle = Arc<Mapping>;
+
 /// Identity maps a physical page into the address space if it is available
-pub fn identity_map(addr_space: &mut AddressSpace, paddr: PhysAddr) -> Result<(), Error> {
+fn identity_map(addr_space: &mut AddressSpace, paddr: PhysAddr) -> Result<MapHandle, Error> {
     let frame = physical_memory_manager().lock().request_frame(paddr)?;
     assert_eq!(frame, paddr);
     let mapping = mapping::Mapping::new_identity(frame);
@@ -30,8 +35,7 @@ pub fn identity_map(addr_space: &mut AddressSpace, paddr: PhysAddr) -> Result<()
 }
 
 /// Map the virtual region to any available memory within the provided address space
-pub fn map(addr_space: &mut AddressSpace, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
-    // TODO: make kernel specific only
+fn map(addr_space: &mut AddressSpace, vaddr: VirtAddr, pages: usize) -> Result<MapHandle, Error> {
     let region = VirtualRegion::new(vaddr, pages);
     let mapping = Mapping::new(region);
     addr_space.insert_and_map(mapping, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
@@ -40,26 +44,35 @@ pub fn map(addr_space: &mut AddressSpace, vaddr: VirtAddr, pages: usize) -> Resu
 /// Map the provided virtual address to the provided physical address.
 ///
 /// Caller must guarantee the physical address is valid!
-pub unsafe fn map_mmio(addr_space: &mut AddressSpace, vaddr: VirtAddr, paddr: PhysAddr, size: usize) -> Result<(), Error> {
+unsafe fn map_mmio(addr_space: &mut AddressSpace, vaddr: VirtAddr, paddr: PhysAddr, size: usize) -> Result<MapHandle, Error> {
     let region = vmm::VirtualRegion::new(vaddr, size);
     let mapping = mapping::Mapping::new_mmio(region, paddr);
     addr_space.insert_and_map(mapping, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
 }
 
 /// Unmaps the virtual address range from th address space and returns freed resources to the PMM
-pub fn unmap(addr_space: &mut AddressSpace, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
+fn unmap(addr_space: &mut AddressSpace, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
     addr_space.release_region(vaddr, pages, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
+}
+
+/// Map specified range to the current user address space
+pub fn user_map(task: &mut Task, vaddr: VirtAddr, pages: usize) -> Result<MapHandle, Error> {
+    trace!("[pid {}] Mapping {:?} to userspace", task.id, vaddr);
+    let addr_space = task.address_space.as_mut().unwrap();
+    let mapping = map(addr_space, vaddr, pages)?;
+    mapping.mark_as_userspace(addr_space.page_table());
+    Ok(mapping)
 }
 
 
 /// Identity maps a physical page into the kernel address space if it is available
-pub fn k_identity_map(paddr: PhysAddr) -> Result<(), Error> {
+pub fn k_identity_map(paddr: PhysAddr) -> Result<MapHandle, Error> {
     let mut kernel_address_space = get_kernel_context_virt().lock();
     identity_map(&mut kernel_address_space, paddr)
 }
 
 /// Map any writable page into the kernel address space at the specified address
-pub fn kmap(vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
+pub fn kmap(vaddr: VirtAddr, pages: usize) -> Result<MapHandle, Error> {
     // TODO: verify address is in higher half 
     //assert!(vaddr.as_u64() >= 0xFFFFFF8000000000);
     let mut kernel_address_space = get_kernel_context_virt().lock();
@@ -75,11 +88,11 @@ pub fn kunmap(vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
 
 /// Identity map the provided physical address. Does not check if the memory is available for
 /// use.
-pub unsafe fn kmap_identity_mmio(paddr: PhysAddr, size: usize) -> Result<(), MemoryManagerError> {
+pub unsafe fn kmap_identity_mmio(paddr: PhysAddr, size: usize) -> Result<MapHandle, MemoryManagerError> {
     kmap_mmio(paddr, VirtAddr::new(paddr.as_u64()), size)
 }
 
-pub unsafe fn kmap_mmio(paddr: PhysAddr, vaddr: VirtAddr, size: usize) -> Result<(), MemoryManagerError> {
+pub unsafe fn kmap_mmio(paddr: PhysAddr, vaddr: VirtAddr, size: usize) -> Result<MapHandle, MemoryManagerError> {
     let mut kernel_address_space = get_kernel_context_virt().lock();
     map_mmio(&mut kernel_address_space, vaddr, paddr, size)
 }
@@ -119,9 +132,7 @@ mod test {
 
     use crate::arch::x86_64::paging::Mapper;
 
-    use super::frame_allocator::FrameAllocator;
     use super::vmm::get_kernel_context_virt;
-
 
     #[test_case]
     fn test_kmap_kunmap() {
@@ -130,8 +141,11 @@ mod test {
         // take the free frames before touching any memory
         let pmm_frames = physical_memory_manager().lock().free_frames();
 
-        let kmap_result = kmap(test_addr, test_size);
-        assert!(kmap_result.is_ok());
+        // Drop the Result + Arc ptr after we're done
+        {
+            let kmap_result = kmap(test_addr, test_size);
+            assert!(kmap_result.is_ok());
+        }
 
         unsafe { 
             (test_addr.as_mut_ptr() as *mut bool).write(true);

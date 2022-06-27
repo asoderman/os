@@ -1,3 +1,4 @@
+
 #[derive(Debug, Default, Clone)]
 #[repr(C)]
 pub struct ScratchRegisters {
@@ -102,3 +103,46 @@ macro_rules! pop_preserved {
     " };
 }
 
+macro_rules! check_and_swap_gs {
+    () => {"
+    cmp QWORD PTR [rsp+0x08], QWORD PTR 0x08
+    je 1f
+    swapgs
+    1:
+    "}
+}
+
+macro_rules! interrupt {
+    ($name:ident, |$stack:ident| $handler:block) => {
+        #[naked]
+        pub unsafe extern "C" fn $name() {
+            unsafe extern "C" fn inner($stack: &mut InterruptStack) {
+                crate::arch::x86_64::smp::thread_local::set_fs_base_to_gs_base();
+                $handler;
+                crate::arch::x86_64::smp::thread_local::restore_fs_base();
+            }
+            core::arch::asm!(concat!(
+                    check_and_swap_gs!(),
+                    "
+                    push rax
+                    ",
+                    push_scratch!(),
+                    push_preserved!(),
+                    "
+                    mov rdi, rsp
+                    call {inner}
+                    ",
+                    pop_preserved!(),
+                    pop_scratch!(),
+                    check_and_swap_gs!(),
+                    "iretq"
+            ),
+                inner = sym inner,
+                options(noreturn));
+        }
+    }
+}
+
+interrupt!(timer, |stack| {
+    crate::interrupt::handlers::timer(stack);
+});

@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
+use x86_64::VirtAddr;
 use x86_64::structures::idt::InterruptDescriptorTable;
-use x86_64::structures::idt::InterruptStackFrame;
 
 static mut IDT: Option<IDTInfo> = None;
 
@@ -44,7 +44,6 @@ macro_rules! impl_and_register_x86_interrupt {
 
 /// Initialize and load an (empty) IDT
 pub fn init_idt() -> Result<(), ()> {
-    crate::println!("enter init_idt");
     if get_idt().is_none() {
         let idt = Box::new(InterruptDescriptorTable::new());
         // Set the global IDT
@@ -71,10 +70,15 @@ pub fn get_idt_mut() -> Option<&'static mut InterruptDescriptorTable> {
     }
 }
 
-#[allow(dead_code)]
-pub unsafe fn register_interrupt_handler(num: usize, f: extern "x86-interrupt" fn(InterruptStackFrame)) {
+pub unsafe fn register_interrupt_handler(num: usize, handler_addr: VirtAddr) {
     if let Some(idt) = &mut IDT {
-        idt.get_idt_mut()[num].set_handler_fn(f).set_present(true);
+        idt.get_idt_mut()[num].set_handler_addr(handler_addr).set_present(true);
     }
+}
+
+pub unsafe fn reg_timer() {
+    let timer = crate::interrupt::number::Interrupt::Timer;
+
+    register_interrupt_handler(timer as usize, VirtAddr::new(super::interrupt::timer as u64))
 }
 

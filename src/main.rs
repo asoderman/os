@@ -30,6 +30,7 @@ mod arch;
 mod cpu;
 mod common;
 mod dev;
+mod elf;
 mod env;
 mod error;
 mod heap;
@@ -84,21 +85,19 @@ fn main(bootinfo: &KernelInfo) {
 
     log::init();
 
-    info!("Heap init");
+    info!("Heap size: {}", heap_init_result.1 - heap_init_result.0);
 
     env::init(bootinfo);
     drop(bootinfo);
 
-    println!("=== {} {} ===\n", info::KERNEL_NAME, info::KERNEL_VERSION);
-    println!("Heap size: {}", heap_init_result.1 - heap_init_result.0);
+    println!("\n=== {} {} ===\n", info::KERNEL_NAME, info::KERNEL_VERSION);
 
     mm::init(heap_init_result);
 
-    println!("{:#X?}", env::memory_layout());
+    info!("{:#X?}", env::memory_layout());
 
     arch::x86_64::platform_init();
 
-    println!("Initializing interrupts");
     interrupt::init().unwrap_or_else(|_| {
         println!("Unable to initialize interrupts");
     });
@@ -113,17 +112,16 @@ fn main(bootinfo: &KernelInfo) {
 }
 
 pub fn idle() {
-    println!("In the idle fn");
     proc::process_list_mut().spawn(|| {
 
         proc::process_list_mut().spawn(|| {
             println!("Hello world! I am {}! Now I will die!", proc::pid());
+            proc::new_user_test();
             proc::exit(0)
         });
 
-        println!("New Process {}\n{}", proc::pid(), time::DateTime::now());
         loop {
-            println!("[{}] Hello from pid: {}, core: {}", time::DateTime::now(), proc::pid(), arch::x86_64::apic_id());
+            println!("Hello from pid: {}, core: {}", proc::pid(), arch::x86_64::apic_id());
             syscall::sleep(2);
         }
     });
@@ -144,6 +142,8 @@ pub fn ap_main() {
 fn panic(info: &PanicInfo) -> ! {
     // Print KERNEL PANIC before even attempting to get core num so we know it's a panic even if we
     // fault in try_apic_id
+    interrupt::disable_interrupts();
+    proc::PANIC.store(true, core::sync::atomic::Ordering::SeqCst);
     write_serial_out("KERNEL PANIC ");
     let core = arch::x86_64::try_apic_id();
     println!("on core {:?}: {}", core, info);
@@ -151,19 +151,15 @@ fn panic(info: &PanicInfo) -> ! {
     #[cfg(test)]
     {
         use qemu::{exit_qemu, QemuExitCode};
+        use ::log::error;
 
-        println!("");
-        println!("Unit test failed!");
-        println!("{}", info);
+        error!("");
+        error!("Unit test failed!");
+        error!("{}", info);
 
         exit_qemu(QemuExitCode::Failed);
     }
-    unsafe {
-        core::arch::asm!("
-        cli
-        hlt
-        ", options(noreturn))
-    }
+    loop {}
 }
 
 
