@@ -95,10 +95,15 @@ install_ovmf:
     sudo mkdir -p {{OVMF_DIR}}
     sudo cp -r usr/share/edk2.git/ovmf-x64/OVMF_CODE-pure-efi.fd {{OVMF_DIR}}
 
+# Set the crate-type in syscall Cargo.toml. This is necessary due to bugs in cargo
+modify_libsyscall_crate_type ARG:
+    cd syscall && python3 crate_type.py {{ARG}}
+
 # NOTE: Before running this build change the crate-type Cargo.toml from "lib" to
 # "staticlib" then revert the change afterwards otherwise the kernel won't build!
 # Build the syscall library as a static library for non rust programs. SEE NOTE in Justfile
 build_libsyscall_static:
+    just modify_libsyscall_crate_type staticlib
     cd syscall && cargo build \
     --features staticlib \
     --release \
@@ -113,6 +118,7 @@ build_libsyscall_static:
     -mkdir userspace/c/include
 
     cp syscall/syscall.h userspace/c/include/syscall.h
+    just modify_libsyscall_crate_type lib
 
 
 # Compile a C program and link it against the syscall library
