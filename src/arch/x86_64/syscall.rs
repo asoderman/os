@@ -11,6 +11,8 @@ use super::smp::thread_local::ProcessorControlBlock;
 use super::interrupt::InterruptStack;
 use super::gdt;
 
+use crate::syscall::NumericResult;
+
 // Clears trap and interrupt enable
 const RFLAGS_MASK: u64 = 0x300;
 
@@ -137,7 +139,7 @@ pub extern "C" fn __inner_receiver(stack: &mut InterruptStack) {
         stack.scratch.rdx,
         stack.scratch.r8,
         stack.scratch.r9,
-    );
+    ).as_isize() as usize;
     unsafe {
         super::smp::thread_local::restore_fs_base();
     }

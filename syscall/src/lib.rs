@@ -3,8 +3,10 @@
 
 use core::arch::asm;
 
-pub mod number;
 pub mod call;
+pub mod error;
+pub mod flags;
+pub mod number;
 
 /// Syscall ABI 
 ///
@@ -15,31 +17,58 @@ pub mod call;
 /// e: r8
 /// f: r9
 ///
-unsafe fn syscall0(a: usize) {
+unsafe extern "C" fn syscall0(a: usize) -> isize {
+    let result: isize;
     asm!("
     mov rax, {}
     syscall
-    ", in(reg) a
+    mov {}, rax
+    ", in(reg) a, out(reg) result,
     );
+
+    result
 }
 
-unsafe fn syscall1(a: usize, b: usize) {
+unsafe extern "C" fn syscall1(a: usize, b: usize) -> isize {
+    let result: isize;
     asm!("
+    mov rax, {}
     mov rdi, {}
-    mov rax, {}
     syscall
-    ", in(reg) b, in(reg) a
+    mov {}, rax
+    ", in(reg) a, in(reg) b, out(reg) result
     );
+
+    result
 }
 
-unsafe fn syscall2(a: usize, b: usize, c: usize) {
+unsafe extern "C" fn syscall2(a: usize, b: usize, c: usize) -> isize {
+    let result: isize;
     asm!("
+    mov rax, {}
     mov rdi, {}
     mov rsi, {}
-    mov rax, {}
     syscall
-    ", in(reg) b, in(reg) c, in(reg) a
+    mov {}, rax
+    ", in(reg) a, in(reg) b, in(reg) c, out(reg) result
     );
+
+    result
+}
+
+unsafe extern "C" fn syscall3(a: usize, b: usize, c: usize, d: usize) -> isize {
+    let result: isize;
+    asm!("
+    mov rax, {}
+    mov rdi, {}
+    mov rsi, {}
+    mov rdx, {}
+    syscall
+    mov {}, rax
+    ", in(reg) a, in(reg) b, in(reg) c, in(reg) d, out(reg) result
+    );
+
+    result
 }
 
 mod panic {

@@ -64,6 +64,10 @@ pub fn user_map(task: &mut Task, vaddr: VirtAddr, pages: usize) -> Result<MapHan
     Ok(mapping)
 }
 
+pub fn user_unmap(task: &mut Task, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
+    let addr_space = task.address_space.as_mut().unwrap();
+    unmap(addr_space, vaddr, pages)
+}
 
 /// Identity maps a physical page into the kernel address space if it is available
 pub fn k_identity_map(paddr: PhysAddr) -> Result<MapHandle, Error> {

@@ -1,7 +1,7 @@
 use spin::RwLock;
 use x86_64::{structures::paging::{PageTable, PageTableFlags}, VirtAddr};
 
-use super::{vmm::{VirtualRegion, VirtualMemoryError}, frame_allocator::FrameAllocator};
+use super::{vmm::{VirtualRegion, VirtualMemoryError}, frame_allocator::FrameAllocator, AddressSpace};
 use crate::arch::{PhysAddr, x86_64::paging::{Mapper, MapError}, PAGE_SIZE};
 
 use bitflags::bitflags;
@@ -136,27 +136,32 @@ impl Mapping {
         &self.range
     }
 
+    pub fn page_count(&self) -> usize {
+        self.range.size
+    }
+
     #[allow(dead_code)]
     pub fn is_read_only(&self) -> bool {
         !self.attr.read().contains(Attributes::RW)
     }
 
-    #[allow(dead_code)]
-    pub fn read_only(&self) {
+    pub fn read_only(&self, address_space: &mut AddressSpace) {
         self.remove_attr(Attributes::EX | Attributes::WRITE);
         self.set_attr(Attributes::READ);
+        clear_flags(self.range, address_space.page_table(), PageTableFlags::WRITABLE);
     }
 
-    #[allow(dead_code)]
-    pub fn read_write(&self) {
+    pub fn read_write(&self, address_space: &mut AddressSpace) {
         self.remove_attr(Attributes::EX);
         self.set_attr(Attributes::READ | Attributes::WRITE);
+        set_flags(self.range, address_space.page_table(), PageTableFlags::WRITABLE);
     }
 
-    #[allow(dead_code)]
-    pub fn executable(&self) {
+    pub fn executable(&self, address_space: &mut AddressSpace) {
         self.remove_attr(Attributes::WRITE);
+        clear_flags(self.range, address_space.page_table(), PageTableFlags::WRITABLE);
         self.set_attr(Attributes::READ | Attributes::EX);
+        todo!("NX bit")
     }
 
     pub fn mark_as_userspace(&self, pt: &mut PageTable) {
@@ -218,5 +223,21 @@ impl Mapping {
 
         self.remove_attr(Attributes::NEEDS_UNMAP);
         Ok(())
+    }
+}
+
+/// Helper function to set the flags all the way down the page table structure
+fn set_flags(range: VirtualRegion, pt: &mut PageTable, flags: PageTableFlags) {
+    for p in range.pages() {
+        let mut mapper = Mapper::new(p, pt);
+        mapper.set_flags(flags).unwrap();
+    }
+}
+
+/// Helper function to clear the bottom-most level flags specified
+fn clear_flags(range: VirtualRegion, pt: &mut PageTable, flags: PageTableFlags) {
+    for p in range.pages() {
+        let mut mapper = Mapper::new(p, pt);
+        mapper.clear_lowest_level_flags(flags).unwrap();
     }
 }

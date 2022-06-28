@@ -250,9 +250,21 @@ impl<'a> Mapper<'a> {
                     _ => (),
                 }
             } else {
-                return Err(MapError::NotPresent)
+                Err(MapError::NotPresent)?
             }
         }
+    }
+
+    pub fn clear_lowest_level_flags(&mut self, flags: PageTableFlags) -> Result<Flusher, MapError> {
+        self.walk();
+
+        if self.next_entry().is_unused() { Err(MapError::NotPresent)? }
+
+        let new = self.next_entry().flags() & !flags;
+
+        self.next_entry().set_flags(new);
+
+        Ok(Flusher(self.addr))
     }
 
     fn current_is_empty(&mut self) -> bool {

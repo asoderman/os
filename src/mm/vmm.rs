@@ -97,7 +97,7 @@ type Error = VirtualMemoryError;
 pub enum VirtualMemoryError {
     NoAddressSpaceAvailable,
     RegionInUse(&'static str),
-    UnmapNonPresent
+    NotPresent
 }
 
 #[derive(Debug)]
@@ -182,7 +182,7 @@ impl AddressSpace {
     /// Removes and unmaps the region containing the region provided as arguments
     pub fn release_region(&mut self, vaddr: VirtAddr, size: usize, frame_allocator: &mut impl FrameAllocator) -> Result<(), VirtualMemoryError> {
         let empty_region = &Mapping::new_empty(VirtualRegion::new(vaddr, size));
-        let region = self.mappings.take(empty_region).ok_or(VirtualMemoryError::UnmapNonPresent)?;
+        let region = self.mappings.take(empty_region).ok_or(VirtualMemoryError::NotPresent)?;
 
         // TODO: RAII unmapping for shared memory
         // Attempt to destroy the mapping
@@ -190,9 +190,30 @@ impl AddressSpace {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn mapping_containing(&self, addr: VirtAddr) -> Option<&Arc<Mapping>> {
-        self.mappings.get(&Mapping::from_address(addr))
+    /// Retrieves the mapping containing the specified address
+    pub fn mapping_containing(&self, addr: VirtAddr) -> Option<Arc<Mapping>> {
+        self.mappings.get(&Mapping::from_address(addr)).map(Arc::clone)
+    }
+
+    /// Sets the entire region containing the address to read/write permissions
+    pub fn set_region_readwrite(&mut self, addr: VirtAddr) -> Result<(), Error> {
+        let mapping = self.mapping_containing(addr).ok_or(VirtualMemoryError::NotPresent)?;
+        mapping.read_write(self);
+        Ok(())
+    }
+
+    /// Sets the entire region containing the address to readonly permissions
+    pub fn set_region_readonly(&mut self, addr: VirtAddr) -> Result<(), Error> {
+        let mapping = self.mapping_containing(addr).ok_or(VirtualMemoryError::NotPresent)?;
+        mapping.read_only(self);
+        Ok(())
+    }
+
+    /// Sets the entire region containing the address to executable permissions
+    pub fn set_region_executable(&mut self, addr: VirtAddr) -> Result<(), Error> {
+        let mapping = self.mapping_containing(addr).ok_or(VirtualMemoryError::NotPresent)?;
+        mapping.executable(self);
+        Ok(())
     }
 
     /// Find a suitable region at or above the provided address

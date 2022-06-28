@@ -258,6 +258,9 @@ dependencies = [
 [[package]]
 name = "syscall"
 version = "0.1.0"
+dependencies = [
+ "bitflags",
+]
 
 [[package]]
 name = "toml"
