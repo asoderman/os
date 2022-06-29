@@ -5,7 +5,7 @@ pub struct UserPtr(VirtAddr);
 
 impl UserPtr {
     pub fn new(addr: VirtAddr) -> Result<Self, SyscallError> {
-        if  0 < addr.as_u64() && addr.as_u64() < 0xFFFFFF8000000000 {
+        if addr.as_u64() < 0xFFFFFF8000000000 {
             Ok(Self(addr))
         } else {
             Err(SyscallError::InvalidPtr)
@@ -14,6 +14,10 @@ impl UserPtr {
 
     pub fn addr(&self) -> VirtAddr {
         self.0
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.0.is_null()
     }
 
     pub unsafe fn as_mut<T>(&mut self) -> Option<&mut T> {
