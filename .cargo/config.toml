@@ -2,7 +2,7 @@
 debug = "make debug"
 
 [build]
-target = "x86_64-bare.json"
+target = "x86_64-kernel-nopic.json"
 # TODO: this target uses PIC so the bootloader needs to support PIC
 #target = "x86_64-unknown-none"
 
@@ -15,5 +15,5 @@ runner = "just update_and_run"
 linker = "ld.lld"
 rustflags = ["-C", "link-arg=-Tlinker.ld"]
 
-[target.x86_64-bare]
+[target.x86_64-kernel-nopic]
 runner = "just update_and_run"

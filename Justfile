@@ -107,7 +107,8 @@ build_libsyscall_static:
     cd syscall && cargo build \
     --features staticlib \
     --release \
-    --target ../x86_64-bare.json
+    --target x86_64-unknown-none
+    #--target ../x86_64-bare.json
 
     cd syscall && cbindgen \
     --config cbindgen.toml \
