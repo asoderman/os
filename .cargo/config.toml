@@ -3,10 +3,17 @@ debug = "make debug"
 
 [build]
 target = "x86_64-bare.json"
+# TODO: this target uses PIC so the bootloader needs to support PIC
+#target = "x86_64-unknown-none"
 
 [unstable]
 build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
+
+[target.x86_64-unknown-none]
+runner = "just update_and_run"
+linker = "ld.lld"
+rustflags = ["-C", "link-arg=-Tlinker.ld"]
 
 [target.x86_64-bare]
 runner = "just update_and_run"

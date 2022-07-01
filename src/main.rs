@@ -7,7 +7,6 @@
 #![feature(abi_x86_interrupt)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
-#![feature(bool_to_option)]
 #![feature(thread_local)]
 #![feature(asm_const)]
 #![feature(asm_sym)]
@@ -64,9 +63,9 @@ fn static_assert(b: bool, msg: &str) {
 
 #[no_mangle]
 extern "C" fn start(bootinfo: *const KernelInfo) {
+    static_assert(!bootinfo.is_null(), "Bootinfo nullptr!");
     let info;
     unsafe {
-        static_assert(bootinfo as usize != 0, "Bootinfo nullptr!");
         stack::set_stack_start((*bootinfo).rsp);
         info = bootinfo.as_ref().expect("Nullptr dereferenced for bootinfo");
     }

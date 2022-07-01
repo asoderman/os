@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(cfg_panic)]
 
 use core::arch::asm;
 
