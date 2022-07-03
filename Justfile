@@ -138,7 +138,7 @@ cc FILE:
     ld.lld \
     -o target/userspace/{{file_name(without_extension(FILE))}} \
     {{without_extension(FILE)}}.o \
-    -L -l syscall/target/x86_64-bare/release/libsyscall.a \
+    -L -l syscall/target/x86_64-unknown-none/release/libsyscall.a \
     -e main \
     # -T linker.ld
 
