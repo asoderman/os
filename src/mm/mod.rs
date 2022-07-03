@@ -64,6 +64,20 @@ pub fn user_map(task: &mut Task, vaddr: VirtAddr, pages: usize) -> Result<MapHan
     Ok(mapping)
 }
 
+/// Map specified range to the current user address space
+pub unsafe fn user_map_mmio_anywhere(task: &mut Task, paddr: PhysAddr, pages: usize) -> Result<MapHandle, Error> {
+    let addr_space = task.address_space.as_mut().unwrap();
+    let vaddr = addr_space
+        .first_available_addr_above(VirtAddr::new(0), pages)
+        .ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
+    trace!("[pid {}] Mapping {:?} to userspace", task.id, vaddr);
+    let mapping = unsafe {
+        map_mmio(addr_space, vaddr.start, paddr, pages)?
+    };
+    mapping.mark_as_userspace(addr_space.page_table());
+    Ok(mapping)
+}
+
 pub fn user_unmap(task: &mut Task, vaddr: VirtAddr, pages: usize) -> Result<(), Error> {
     let addr_space = task.address_space.as_mut().unwrap();
     unmap(addr_space, vaddr, pages)
