@@ -1,7 +1,7 @@
 use alloc::{vec::Vec, collections::BTreeMap, boxed::Box};
 
-use super::{Path, FileSystem, VFSAttributes, Error, file::{File, FileAttributes, Read, Write, VirtualNode}, FsError};
-use super::FsType;
+use super::{Path, FileSystem, FSAttributes, Error, file::{File, FileAttributes, Read, Write, VirtualNode}, FsError};
+use super::filesystem::FsType;
 
 /// An in memory (only) filesystem
 #[derive(Debug)]
@@ -47,8 +47,8 @@ impl FileSystem for RamFs {
         todo!()
     }
 
-    fn attributes(&self) -> Option<VFSAttributes> {
-        Some(VFSAttributes {
+    fn attributes(&self) -> Option<FSAttributes> {
+        Some(FSAttributes {
                 block_size: 1,
                 files: self.files.len(),
                 fs_type: FsType::Ram,
@@ -164,6 +164,15 @@ impl Write for MemoryFile {
         self.data.copy_from_slice(buf);
         Ok(buf.len())
     }
+}
+
+/// Construct a ram filesystem vfs object
+pub fn init_ramfs() {
+    use super::VFS;
+
+    let ramfs_vfs = VFS::new(Box::new(RamFs::new()));
+
+    ramfs_vfs.mount(Path::from_str("/tmp"), &[]).expect("Could not mount ramfs");
 }
 
 #[cfg(test)]

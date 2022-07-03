@@ -102,7 +102,7 @@ fn main(bootinfo: &KernelInfo) {
         println!("Unable to initialize interrupts");
     });
 
-    fs::init_ramfs();
+    fs::init();
 
     #[cfg(test)]
     test_main();
