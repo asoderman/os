@@ -29,6 +29,7 @@ mod arch;
 mod cpu;
 mod common;
 mod dev;
+mod fs;
 mod elf;
 mod env;
 mod error;
@@ -100,6 +101,8 @@ fn main(bootinfo: &KernelInfo) {
     interrupt::init().unwrap_or_else(|_| {
         println!("Unable to initialize interrupts");
     });
+
+    fs::init_ramfs();
 
     #[cfg(test)]
     test_main();
