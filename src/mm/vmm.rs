@@ -128,9 +128,19 @@ impl Clone for AddressSpace {
         let page_table_ptr: *mut PageTable = phys_to_virt(phys_frame).as_mut_ptr();
         unsafe {
             // Perform shallow page table clone
+            /*
              for (dst, src) in page_table_ptr.as_mut().unwrap().iter_mut().zip(self.page_table.as_ref().iter()) {
                  dst.clone_from(src);
              }
+            */
+
+            // FIXME: Fix hardcodings here. We need to verify the lower address space is completely
+            // empty
+            //
+            // shallow clone the last two entries of the page table where the kernel
+            // mappings are located
+            (*page_table_ptr)[510].clone_from(&self.page_table.as_ref()[510]);
+            (*page_table_ptr)[511].clone_from(&self.page_table.as_ref()[511]);
 
             Self {
                 page_table: Unique::new_unchecked(page_table_ptr),

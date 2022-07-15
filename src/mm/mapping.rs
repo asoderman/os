@@ -1,3 +1,4 @@
+use log::warn;
 use spin::RwLock;
 use x86_64::{structures::paging::{PageTable, PageTableFlags}, VirtAddr};
 
@@ -64,8 +65,8 @@ impl Eq for Mapping { }
 impl Drop for Mapping {
     fn drop(&mut self) {
         if self.attr.get_mut().contains(Attributes::NEEDS_UNMAP) {
-            println!("Mapping dropped: {:?}", self);
-            todo!("Implement unmap/releasing physical frames back to pmm on drop");
+            warn!("Mapping dropped: {:?}", self);
+            //todo!("Implement unmap/releasing physical frames back to pmm on drop");
         }
     }
 }
