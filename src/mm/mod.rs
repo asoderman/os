@@ -46,7 +46,15 @@ fn map(addr_space: &mut AddressSpace, vaddr: VirtAddr, pages: usize) -> Result<M
 /// Caller must guarantee the physical address is valid!
 unsafe fn map_mmio(addr_space: &mut AddressSpace, vaddr: VirtAddr, paddr: PhysAddr, size: usize) -> Result<MapHandle, Error> {
     let region = vmm::VirtualRegion::new(vaddr, size);
-    let mapping = mapping::Mapping::new_mmio(region, paddr);
+    let mapping = mapping::Mapping::new_mmio(region, paddr, false);
+    addr_space.insert_and_map(mapping, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
+}
+
+unsafe fn map_huge_mmio(addr_space: &mut AddressSpace,  vaddr: VirtAddr, paddr: PhysAddr, size: usize) -> Result<MapHandle, Error> {
+    let region = vmm::VirtualRegion::new(vaddr, size);
+
+    let mapping = mapping::Mapping::new_mmio(region, paddr, true);
+
     addr_space.insert_and_map(mapping, &mut *physical_memory_manager().lock()).map_err(|e| e.into())
 }
 
@@ -73,6 +81,20 @@ pub unsafe fn user_map_mmio_anywhere(task: &mut Task, paddr: PhysAddr, pages: us
     trace!("[pid {}] Mapping {:?} to userspace", task.id, vaddr);
     let mapping = unsafe {
         map_mmio(addr_space, vaddr.start, paddr, pages)?
+    };
+    mapping.mark_as_userspace(addr_space.page_table());
+    Ok(mapping)
+}
+
+/// Map specified range to the current user address space
+pub unsafe fn user_map_huge_mmio_anywhere(task: &mut Task, paddr: PhysAddr, pages: usize) -> Result<MapHandle, Error> {
+    let addr_space = task.address_space.as_mut().unwrap();
+    let vaddr = addr_space
+        .first_available_addr_above(VirtAddr::new(0), pages)
+        .ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
+    trace!("Mapping HUGE {:?} to userspace", vaddr);
+    let mapping = unsafe {
+        map_huge_mmio(addr_space, vaddr.start, paddr, pages)?
     };
     mapping.mark_as_userspace(addr_space.page_table());
     Ok(mapping)

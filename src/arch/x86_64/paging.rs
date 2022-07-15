@@ -156,6 +156,53 @@ impl<'a> Mapper<'a> {
         Ok(())
     }
 
+    /// Sets the level 2 page entry to the physical frame provided and sets the huge frame flag.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the frame is a valid huge frame and that the mapper is in the
+    /// correct state to set the frame i.e. the next_entry() is a level 2 page entry
+    fn map_next_huge(&mut self, frame: PhysAddr) -> Result<(), MapError> {
+        if self.current_level == 2 {
+            let huge_page_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::HUGE_PAGE;
+            let entry = self.next_entry();
+            if !entry.is_unused() { Err(MapError::PresentEntry)? }
+            entry.set_addr(frame, huge_page_flags);
+
+            Ok(())
+        } else {
+            // TODO: this needs its own error type
+            Err(MapError::BottomLevel)
+        }
+    }
+
+    /// Maps the provided frame to the address specified by the mapper. Currently only supports
+    /// level 2 2mb frames
+    ///
+    /// # Safety
+    /// Caller must ensure the provided frame can be mapped as a huge frame
+    pub fn map_huge_frame(&mut self, frame: PhysAddr, frame_allocator: &mut impl FrameAllocator) -> Result<Flusher, MapError> {
+
+        loop {
+            match self.advance() {
+                Err(MapError::NotPresent) => {
+                    if self.current_level > 2 {
+                        self.map_next(frame_allocator)?
+                    }
+                },
+                Ok(_) => {
+                    if self.current_level == 2 {
+                        self.map_next_huge(frame)?;
+                        break;
+                    }
+                },
+                _ => todo!("Handle other cases when mapping huge frame")
+            }
+        }
+
+        Ok(Flusher(self.addr))
+    }
+
     pub fn map_frame(&mut self, frame: PhysAddr, frame_allocator: &mut impl FrameAllocator) -> Result<Flusher, MapError> {
 
         loop {
@@ -302,9 +349,25 @@ impl<'a> Mapper<'a> {
             self.current()[i % MAX_PAGE_ENTRIES].set_addr(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
         }
     }
+
+    /// Returns the physical address of the lowest level of the page table structure
+    pub fn get_phys_frame(&mut self) -> Option<(PhysAddr, bool)> {
+        loop {
+            match self.advance() {
+                Err(MapError::BottomLevel) |
+                    Err(MapError::HugeFrame(_)) => {
+                        let index = self.next_index();
+                        let current = &mut self.current()[index];
+                        let result = (current.addr(), current.flags().contains(PageTableFlags::HUGE_PAGE));
+                        return Some(result)
+                    }
+                Ok(_) => (),
+                Err(_) => return None
+            }
+        }
+    }
 }
 
-#[cfg(test)]
 pub fn get_cr3() -> PhysAddr {
     x86_64::registers::control::Cr3::read().0.start_address()
 }

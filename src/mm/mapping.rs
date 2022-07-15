@@ -16,6 +16,7 @@ bitflags! {
         const READ = 0b1;
         const WRITE = 0b10;
         const EXECUTABLE = 0b100;
+        const HUGE = 0b01000000;
         // Permissions
         const EX = Attributes::EXECUTABLE.bits | Attributes::READ.bits;
         const RW = Attributes::READ.bits | Attributes::WRITE.bits;
@@ -101,11 +102,14 @@ impl Mapping {
     }
 
     /// Create a new MMIO Mapping
-    pub(super) fn new_mmio(range: VirtualRegion, paddr: PhysAddr) -> Self {
+    pub(super) fn new_mmio(range: VirtualRegion, paddr: PhysAddr, is_huge: bool) -> Self {
+        let attr = RwLock::new(Attributes::RW);
+        attr.write().set(Attributes::HUGE, is_huge);
+
         Mapping {
             range,
             kind: MappingType::MMIO(paddr),
-            attr: RwLock::new(Attributes::RW)
+            attr
         }
     }
 
@@ -146,6 +150,10 @@ impl Mapping {
         !self.attr.read().contains(Attributes::RW)
     }
 
+    pub fn is_huge(&self) -> bool {
+        self.attr.read().contains(Attributes::HUGE)
+    }
+
     pub fn read_only(&self, address_space: &mut AddressSpace) {
         self.remove_attr(Attributes::EX | Attributes::WRITE);
         self.set_attr(Attributes::READ);
@@ -176,8 +184,13 @@ impl Mapping {
     pub fn map(&mut self, pt: &mut PageTable, frame_allocator: &mut impl FrameAllocator) -> Result<(), MapError> {
         match self.kind {
             MappingType::MMIO(paddr) | MappingType::Identity(paddr) => {
-                for (i, page) in self.range.pages().into_iter().enumerate() {
-                    Mapper::new(page, pt).map_frame(paddr + (i  * PAGE_SIZE), frame_allocator)?;
+                if self.is_huge() {
+                    let start = self.range.start;
+                    Mapper::new(start, pt).map_huge_frame(paddr, frame_allocator)?;
+                } else {
+                    for (i, page) in self.range.pages().into_iter().enumerate() {
+                        Mapper::new(page, pt).map_frame(paddr + (i  * PAGE_SIZE), frame_allocator)?;
+                    }
                 }
             }
             MappingType::KernelData => {
