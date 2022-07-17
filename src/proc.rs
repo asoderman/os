@@ -215,7 +215,7 @@ impl Task {
         } else {
             let this_core = self.core_id
                 .map(|c| c == apic_id() as usize)
-                .unwrap_or(true);
+                .unwrap_or(false);
 
             this_core && self.status == Status::Ready
         }
@@ -341,7 +341,7 @@ pub fn exit(_status: usize) {
 /// # Returns 
 /// If the process was switched
 pub unsafe fn switch_next() -> bool {
-    while PROC_SWITCH_LOCK.compare_exchange_weak(false, true, Ordering::Release, Ordering::Relaxed).is_err() {}
+    while PROC_SWITCH_LOCK.compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::Relaxed).is_err() {}
     let current = process_list().current();
 
     process_list().update_all();
@@ -367,7 +367,7 @@ pub unsafe fn switch_next() -> bool {
 
         true
     } else {
-        PROC_SWITCH_LOCK.store(false, Ordering::Release);
+        PROC_SWITCH_LOCK.store(false, Ordering::SeqCst);
         false
     }
 }
@@ -381,6 +381,8 @@ pub extern "C" fn switch_hook(_old: &mut Context, _current: &mut Context) {
             process_list_mut().remove(old_pid);
         }
     }
-    crate::proc::PROC_SWITCH_LOCK.store(false, core::sync::atomic::Ordering::Release);
+    trace!("Last context: {:#X?}", _old);
+    trace!("new context: {:#X?}", _current);
+    crate::proc::PROC_SWITCH_LOCK.store(false, Ordering::SeqCst);
     trace!("switch success");
 }
