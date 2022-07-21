@@ -29,19 +29,13 @@ enum Permission {
 #[derive(Debug, Clone)]
 pub struct FileNode {
     file: Arc<RwLock<dyn File>>,
-    access: Permission,
 }
 
 impl FileNode {
     fn new<F: File + Default + 'static>() -> Self {
         Self {
             file: Arc::new(RwLock::new(F::default())),
-            access: Permission::Writable,
         }
-    }
-
-    fn make_read_only(&mut self) {
-        self.access = Permission::Readable;
     }
 }
 
@@ -65,12 +59,6 @@ pub enum VirtualNode {
 
 impl VirtualNode {
     pub fn new_file<F: File + Default + 'static>() -> Self {
-        let mut node = FileNode::new::<F>();
-        node.make_read_only();
-        Self::File(node)
-    }
-
-    pub fn new_writable_file<F: File + Default + 'static>() -> Self {
         Self::File(FileNode::new::<F>())
     }
 

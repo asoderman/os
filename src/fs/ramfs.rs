@@ -97,7 +97,7 @@ impl FileSystem for RamFs {
     }
 
     fn create_file(&mut self, path: Path) -> Result<(), Error> {
-        if self.files.insert(path, VirtualNode::new_writable_file::<MemoryFile>()).is_some() {
+        if self.files.insert(path, VirtualNode::new_file::<MemoryFile>()).is_some() {
             Err(FsError::Exists)
         } else {
             Ok(())
