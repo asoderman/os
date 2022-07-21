@@ -16,58 +16,61 @@ pub mod number;
 /// e: r8
 /// f: r9
 ///
-unsafe extern "C" fn syscall0(a: usize) -> isize {
-    let result: isize;
+unsafe extern "C" fn syscall0(mut a: usize) -> isize {
     asm!("
-    mov rax, {}
     syscall
-    mov {}, rax
-    ", in(reg) a, out(reg) result,
+    ", inout("rax") a, out("r11") _, out("rcx") _
     );
 
-    result
+    a as isize
 }
 
-unsafe extern "C" fn syscall1(a: usize, b: usize) -> isize {
-    let result: isize;
+unsafe extern "C" fn syscall1(mut a: usize, b: usize) -> isize {
     asm!("
-    mov rax, {}
-    mov rdi, {}
     syscall
-    mov {}, rax
-    ", in(reg) a, in(reg) b, out(reg) result
+    ", inout("rax") a, in("rdi") b, out("r11") _, out("rcx") _
     );
 
-    result
+    a as isize
 }
 
-unsafe extern "C" fn syscall2(a: usize, b: usize, c: usize) -> isize {
-    let result: isize;
+unsafe extern "C" fn syscall2(mut a: usize, b: usize, c: usize) -> isize {
     asm!("
-    mov rax, {}
-    mov rdi, {}
-    mov rsi, {}
     syscall
-    mov {}, rax
-    ", in(reg) a, in(reg) b, in(reg) c, out(reg) result
+    ", inout("rax") a, in("rdi") b, in("rsi") c, out("rcx") _, out("r11") _
     );
 
-    result
+    a as isize
 }
 
-unsafe extern "C" fn syscall3(a: usize, b: usize, c: usize, d: usize) -> isize {
+unsafe extern "C" fn syscall3(mut a: usize, b: usize, c: usize, d: usize) -> isize {
     let result: isize;
     asm!("
-    mov rax, {}
-    mov rdi, {}
-    mov rsi, {}
-    mov rdx, {}
     syscall
-    mov {}, rax
-    ", in(reg) a, in(reg) b, in(reg) c, in(reg) d, out(reg) result
+    ", inout("rax") a, in("rdi") b, in("rsi") c, in("rdx") d, out("r11") _, out("rcx")_
     );
 
-    result
+    a as isize
+}
+
+unsafe extern "C" fn syscall4(mut a: usize, b: usize, c: usize, d: usize, e: usize) -> isize {
+    let result: isize;
+    asm!("
+    syscall
+    ", inout("rax") a, in("rdi") b, in("rsi") c, in("rdx") d, in("r8") e, out("r11") _, out("rcx")_
+    );
+
+    a as isize
+}
+
+unsafe extern "C" fn syscall5(mut a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+    let result: isize;
+    asm!("
+    syscall
+    ", inout("rax") a, in("rdi") b, in("rsi") c, in("rdx") d, in("r8") e, in("r9") f, out("r11") _, out("rcx")_
+    );
+
+    a as isize
 }
 
 mod panic {
