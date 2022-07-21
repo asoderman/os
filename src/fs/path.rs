@@ -26,6 +26,10 @@ impl Path {
         Path::new(path.as_bytes()).unwrap()
     }
 
+    pub fn from_string(s: String) -> Self {
+        Path(s)
+    }
+
     /// Constructs an empty ("") path
     pub fn empty() -> Self {
         Self::from_str("")
@@ -57,7 +61,29 @@ impl Path {
 
     /// Returns an iterator of each node that makes up the path
     pub fn components(&self) -> impl Iterator<Item = &str> {
-        self.0.split('/')
+        let mut iter = self.0.split('/').peekable();
+
+        if iter.peek().unwrap_or(&"").eq(&"") {
+            iter.next();
+        }
+
+        iter
+    }
+
+    pub fn from_components<'s>(c: impl Iterator<Item = &'s str>) -> Path {
+        let mut base = String::from("/");
+        for component in c {
+            base.push_str(component);
+            base.push('/');
+        }
+
+        Self::from_string(base)
+    }
+
+    pub fn remove_trailing_slash(&mut self) {
+        if self.0.ends_with('/') {
+            self.0.pop();
+        }
     }
 
     pub(super) fn starts_with(&self, prefix: &Self) -> bool {
