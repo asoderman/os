@@ -128,6 +128,7 @@ impl VirtualNode {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct FileAttributes {
     pub file_size: usize,
     pub access_time: usize,

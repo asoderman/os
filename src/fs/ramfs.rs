@@ -1,6 +1,8 @@
 use alloc::{vec::Vec, collections::BTreeMap, boxed::Box, sync::Arc};
 use spin::RwLock;
 
+use crate::time::DateTime;
+
 use super::{Path, FileSystem, FSAttributes, Error, file::{File, FileAttributes, Read, Write, VirtualNode}, FsError};
 use super::filesystem::FsType;
 
@@ -139,10 +141,42 @@ impl FileSystem for RamFs {
     }
 }
 
-#[derive(Debug, Default)]
+/// A volatile memory file.
+#[derive(Debug)]
 struct MemoryFile {
     data: Vec<u8>,
     position: usize,
+
+    attributes: RwLock<FileAttributes>
+}
+
+impl Default for MemoryFile {
+    fn default() -> Self {
+        let d = Self {
+            data: Default::default(),
+            position: Default::default(),
+            attributes: Default::default()
+        };
+
+        d.update_create_time();
+
+        d
+    }
+}
+
+impl MemoryFile {
+    fn update_access_time(&self) {
+        self.attributes.write().access_time = DateTime::utc_now().0 as usize;
+    }
+
+    fn update_create_time(&self) {
+        self.attributes.write().create_time = DateTime::utc_now().0 as usize;
+    }
+
+    fn update_modified_time(&self) {
+        self.attributes.write().modified_time = DateTime::utc_now().0 as usize;
+    }
+
 }
 
 impl File for MemoryFile {
@@ -154,13 +188,12 @@ impl File for MemoryFile {
         self.position
     }
 
-    fn attributes(&self) -> super::file::FileAttributes {
+    fn attributes(&self) -> FileAttributes {
+        let attr = self.attributes.read().clone();
         FileAttributes {
             file_size: self.data.len(),
-            access_time: 0,
-            modified_time: 0,
-            create_time: 0,
-            blocks: self.data.len()
+            blocks: self.data.len(),
+            ..attr
         }
     }
 }
@@ -169,7 +202,7 @@ impl Read for MemoryFile {
     fn read(&self, buf: &mut [u8]) -> Result<usize, Error> {
         // TODO: Position
         buf[..self.data.len()].copy_from_slice(&self.data[self.position..]);
-
+        self.update_access_time();
         Ok(core::cmp::min(buf.len(), self.data[self.position..].len()))
     }
 }
@@ -180,6 +213,7 @@ impl Write for MemoryFile {
             self.data.resize(buf.len(), 0);
         }
         self.data.copy_from_slice(buf);
+        self.update_modified_time();
         Ok(buf.len())
     }
 }
