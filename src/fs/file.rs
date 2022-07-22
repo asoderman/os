@@ -1,13 +1,22 @@
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use core::fmt::Debug;
 use spin::RwLock;
 
 use super::{Error, FsError};
 
+use crate::{arch::VirtAddr, proc::process_list};
+
 pub trait File: Read + Write + Debug + Send + Sync {
-    fn open(&self) -> Result<(), Error>;
-    fn close(&self) -> Result<(), Error>;
+    fn open(&self) -> Result<(), Error> {
+        Ok(())
+    }
+    fn close(&self) -> Result<(), Error> {
+        Ok(())
+    }
     fn content(&self) -> Result<&[u8], Error>;
+    fn mmap(&self) -> Result<VirtAddr, Error> {
+        Err(FsError::InvalidAccess)
+    }
     fn position(&self) -> usize;
     fn attributes(&self) -> FileAttributes;
 }
@@ -53,13 +62,37 @@ impl Write for FileNode {
 
 #[derive(Debug, Clone)]
 pub enum VirtualNode {
+    WeakFile(Weak<RwLock<dyn File>>),
     File(FileNode),
     Directory
+}
+
+impl<F: File + 'static> From<F> for VirtualNode {
+    fn from(file: F) -> Self {
+        Self::File(FileNode { file: Arc::new(RwLock::new(file)) })
+    }
 }
 
 impl VirtualNode {
     pub fn new_file<F: File + Default + 'static>() -> Self {
         Self::File(FileNode::new::<F>())
+    }
+
+    pub fn weak_clone(&self) -> Self {
+        if let Self::File(node) = self {
+            Self::WeakFile(Arc::downgrade(&node.file))
+        } else {
+            self.clone()
+        }
+    }
+
+    pub fn upgrade(self) -> Option<Self> {
+        match self {
+            Self::WeakFile(weak) => {
+                Some(Self::File(FileNode { file: weak.upgrade()? }))
+            },
+            _ => Some(self)
+        }
     }
 
     pub fn read(&self, buffer: &mut [u8]) -> Result<usize, Error> {
@@ -78,12 +111,27 @@ impl VirtualNode {
             Err(FsError::InvalidAccess)
         }
     }
+
+    /// Add this virtual node to the current process' open files list
+    pub fn open(&self) -> usize {
+        let current = process_list().current();
+        let mut lock = current.write();
+
+        lock.add_open_file(self.clone())
+    }
+
+    /// Invoke the implementation's close method
+    pub fn close(&self) {
+        if let VirtualNode::File(file) = self {
+            file.file.write().close();
+        }
+    }
 }
 
 pub struct FileAttributes {
     pub file_size: usize,
     pub access_time: usize,
     pub modified_time: usize,
-    pub change_time: usize,
+    pub create_time: usize,
     pub blocks: usize,
 }

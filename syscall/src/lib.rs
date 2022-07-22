@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(core_ffi_c)]
 
 use core::arch::asm;
 

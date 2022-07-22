@@ -1,4 +1,5 @@
-use alloc::{vec::Vec, collections::BTreeMap, boxed::Box};
+use alloc::{vec::Vec, collections::BTreeMap, boxed::Box, sync::Arc};
+use spin::RwLock;
 
 use super::{Path, FileSystem, FSAttributes, Error, file::{File, FileAttributes, Read, Write, VirtualNode}, FsError};
 use super::filesystem::FsType;
@@ -47,12 +48,8 @@ impl FileSystem for RamFs {
         todo!()
     }
 
-    fn attributes(&self) -> Option<FSAttributes> {
-        Some(FSAttributes {
-                block_size: 1,
-                files: self.files.len(),
-                fs_type: FsType::Ram,
-        })
+    fn exists(&self, path: &Path) -> bool {
+        self.files.contains_key(path)
     }
 
     fn read_dir(&self, path: Path) -> Result<alloc::boxed::Box<dyn Iterator<Item=Path>>, Error> {
@@ -108,8 +105,21 @@ impl FileSystem for RamFs {
         self.files.remove(&path).ok_or(FsError::Exists).map(|_| ())
     }
 
-    fn exists(&self, path: &Path) -> bool {
-        self.files.contains_key(path)
+    fn attributes(&self) -> Option<FSAttributes> {
+        Some(FSAttributes {
+                block_size: 1,
+                files: self.files.len(),
+                fs_type: FsType::Ram,
+        })
+    }
+
+    fn insert_node(&mut self, path: Path, node: VirtualNode) -> Result<(), Error> {
+        // TODO: check if path is correct e.g. parent exists
+        if self.files.insert(path, node).is_none() {
+            Ok(())
+        } else {
+            Err(FsError::Exists)
+        }
     }
 }
 
@@ -120,14 +130,6 @@ struct MemoryFile {
 }
 
 impl File for MemoryFile {
-    fn open(&self) -> Result<(), Error> {
-        todo!()
-    }
-
-    fn close(&self) -> Result<(), Error> {
-        todo!()
-    }
-
     fn content(&self) -> Result<&[u8], Error> {
         Ok(&self.data)
     }
@@ -139,9 +141,9 @@ impl File for MemoryFile {
     fn attributes(&self) -> super::file::FileAttributes {
         FileAttributes {
             file_size: self.data.len(),
-            access_time: 0, //todo!(),
-            modified_time: 0, //todo!(),
-            change_time: 0, //todo!(),
+            access_time: 0,
+            modified_time: 0,
+            create_time: 0,
             blocks: self.data.len()
         }
     }
@@ -168,11 +170,11 @@ impl Write for MemoryFile {
 
 /// Construct a ram filesystem vfs object
 pub fn init_ramfs() {
-    use super::VFS;
+    use super::rootfs;
 
-    let ramfs_vfs = VFS::new(Box::new(RamFs::new()));
+    let ramfs_vfs = Arc::new(RwLock::new(RamFs::new()));
 
-    ramfs_vfs.mount(Path::from_str("/tmp"), &[]).expect("Could not mount ramfs");
+    rootfs().write().mount_filesystem(ramfs_vfs, Path::from_str("/tmp")).expect("Could not create ramfs");
 }
 
 #[cfg(test)]

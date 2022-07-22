@@ -2,33 +2,34 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use core::fmt::Debug;
 
 use alloc::string::FromUtf8Error;
+use alloc::sync::Arc;
 use alloc::{boxed::Box, vec::Vec};
 
 pub use path::Path;
 
 mod file;
 mod filesystem;
+mod generic_file;
 mod path;
 mod ramfs;
+mod rootfs;
 
 use spin::RwLock;
 
 use lazy_static::lazy_static;
 
+pub use generic_file::GenericFile;
 pub use file::VirtualNode;
 pub use filesystem::FSAttributes;
 
+pub use rootfs::rootfs;
+
 use filesystem::FileSystem;
 
-lazy_static! {
-    static ref VFS_LIST: RwLock<Vec<VFS>> = RwLock::new(Vec::new());
-}
-
-static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+/*
 
 #[derive(Debug)]
 struct VFS {
-    pub id: usize,
     pub fs: Box<dyn FileSystem>,
 }
 
@@ -36,7 +37,6 @@ impl VFS {
     /// Wrap a filesystem in the VFS interface. Does not add new VFS to the global mount list
     fn new(fs: Box<dyn FileSystem>) -> Self {
         Self {
-            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             fs,
         }
     }
@@ -45,16 +45,6 @@ impl VFS {
         self.fs.mount(root, data)?;
 
         VFS_LIST.write().push(self);
-
-        Ok(())
-    }
-
-    fn unmount(&self) -> Result<(), Error> {
-        // TODO handle error
-        let index = VFS_LIST.read().iter().position(|vfs| vfs.id == self.id).unwrap();
-        let unmounted_vfs = VFS_LIST.write().remove(index);
-
-        unmounted_vfs.fs.unmount()?;
 
         Ok(())
     }
@@ -87,6 +77,7 @@ impl VFS {
         todo!()
     }
 }
+*/
 
 type Error = FsError;
 
@@ -95,9 +86,20 @@ pub enum FsError {
     InvalidPath(Option<FromUtf8Error>),
     InvalidAccess,
     Exists,
+    BadFd,
+}
+/// Construct a ram filesystem vfs object
+fn init_devfs() {
+    let dev_fs = Arc::new(RwLock::new(ramfs::RamFs::new()));
+
+    let serial_device = crate::dev::serial::generic_serial_device();
+
+    dev_fs.write().insert_node(Path::from_str("/dev/serial"), serial_device.into()).expect("Could not create serial device file");
+
+    rootfs().write().mount_filesystem(dev_fs, Path::from_str("/dev")).expect("Could not create ramfs");
 }
 
 pub fn init() {
     ramfs::init_ramfs();
-
+    init_devfs();
 }

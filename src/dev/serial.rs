@@ -4,6 +4,8 @@ use core::fmt::{Write, Error, Display};
 use x86_64::instructions::port::PortWriteOnly;
 use log::{Log, Level};
 
+use crate::fs::GenericFile;
+
 static SERIAL_OUT: Mutex<Serial> = Mutex::new(Serial::com1());
 static SERIAL_REF: SerialRef = SerialRef(&SERIAL_OUT);
 
@@ -114,6 +116,19 @@ impl Log for SerialRef {
     fn flush(&self) {
         ()
     }
+}
+
+/// Constructs a generic device where the read and write invoke the serial port
+pub fn generic_serial_device() -> GenericFile {
+    let mut file = GenericFile::default();
+
+    file.read_impl = |_buffer| { todo!() };
+    file.write_impl = |buffer| {
+        SERIAL_OUT.lock().write(core::str::from_utf8(buffer).unwrap_or("SERIAL ERROR"));
+        Ok(buffer.len())
+    };
+
+    file
 }
 
 pub fn print(args: core::fmt::Arguments) {

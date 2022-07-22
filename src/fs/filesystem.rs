@@ -36,6 +36,7 @@ pub(super) trait FileSystem: Debug + Send + Sync {
     fn create_file(&mut self, path: Path) -> Result<(), Error>;
     fn remove_file(&mut self, path: Path) -> Result<(), Error>;
 
+    fn insert_node(&mut self, path: Path, node: VirtualNode) -> Result<(), Error>;
 
     fn attributes(&self) -> Option<FSAttributes>;
 }

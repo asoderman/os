@@ -29,4 +29,12 @@ intptr_t munmap(const uint8_t *ptr, uintptr_t pages);
 
 intptr_t mprotect(const uint8_t *ptr, uintptr_t pages, uintptr_t prot);
 
+intptr_t open(const char *path);
+
+intptr_t close(uintptr_t fd);
+
+intptr_t read(uintptr_t fd, uint8_t *buffer, uintptr_t len);
+
+intptr_t write(uintptr_t fd, const uint8_t *buffer, uintptr_t len);
+
 struct MemoryFlags mflags_empty(void);

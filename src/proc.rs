@@ -11,6 +11,7 @@ use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::arch::x86_64::context::enter_user;
 use crate::elf::Loader;
+use crate::fs::VirtualNode;
 use crate::interrupt::{enable_and_halt, disable_interrupts, without_interrupts, restore_interrupts};
 use crate::mm::AddressSpace;
 use crate::stack::{KernelStack, UserStack};
@@ -63,6 +64,8 @@ impl ProcessList {
             _kstack: None,
             user_stack: None,
             entry_point: VirtAddr::new(0),
+
+            open_files: BTreeMap::new(),
 
             status: Status::NotRunnable,
 
@@ -176,6 +179,8 @@ pub struct Task {
     pub user_stack: Option<UserStack>,
     pub entry_point: VirtAddr,
 
+    pub open_files: BTreeMap<usize, VirtualNode>,
+
     status: Status,
     arch_context: Context,
 }
@@ -192,6 +197,8 @@ impl Task {
 
         context.set_cr3(address_space.phys_addr());
 
+        let mut open_files = BTreeMap::new();
+
         info!("New task {} created", id);
 
         Arc::new(RwLock::new(Task {
@@ -203,9 +210,28 @@ impl Task {
             user_stack: None,
 
             entry_point,
+
+            open_files,
             status: Status::Ready,
             arch_context: context
         }))
+    }
+
+    /// Adds the virtual node to the process' open file list
+    pub fn add_open_file(&mut self, node: VirtualNode) -> usize {
+        let fd = self.open_files.last_key_value().map(|(key, _)| *key).unwrap_or(0);
+        self.open_files.insert(fd + 1, node);
+        fd + 1
+    }
+
+    pub fn close_file(&mut self, fd: usize) -> Result<(), crate::fs::FsError> {
+        let result = self.open_files.remove(&fd);
+
+        if let Some(node) = result {
+            Ok(node.close())
+        } else {
+            Err(crate::fs::FsError::BadFd)
+        }
     }
 
     fn runnable(&self) -> bool {
@@ -278,14 +304,24 @@ pub fn process_list_mut<'l>() -> RwLockWriteGuard<'l, ProcessList> {
 }
 
 static TEST_ELF: &[u8] = include_bytes!("../target/userspace/test_user");
+static TEST_FS: &[u8] = include_bytes!("../target/userspace/test_fs");
 
 extern "C" fn load_elf() {
     process_list().current().write().load_elf(TEST_ELF).unwrap();
 }
 
+extern "C" fn load_elf_fs_test() {
+    process_list().current().write().load_elf(TEST_FS).unwrap();
+}
+
 pub fn new_user_test() {
     let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
     task.write().arch_context.push(load_elf as usize);
+
+    process_list_mut().insert(task).unwrap();
+
+    let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
+    task.write().arch_context.push(load_elf_fs_test as usize);
 
     process_list_mut().insert(task).unwrap();
 }

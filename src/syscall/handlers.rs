@@ -5,6 +5,7 @@ use syscall::error::SyscallError;
 use syscall::flags::MemoryFlags;
 
 use crate::arch::VirtAddr;
+use crate::fs::{rootfs, Path};
 use crate::mm::{user_map, user_unmap};
 use crate::proc::{process_list, yield_time, exit};
 use crate::interrupt::{without_interrupts, disable_interrupts};
@@ -120,4 +121,32 @@ pub fn log_print(ptr: UserPtr, len: usize) -> Result<()> {
     log::info!("{:?}", string);
 
     Ok(())
+}
+
+pub fn open(path: &[u8]) -> Result<usize> {
+    let path = Path::new(path).map_err(|_| SyscallError::InvalidPath)?;
+    log::info!("Opening: {:?}", path);
+    let node = rootfs().read().get_file(&path).map_err(|_| SyscallError::Exist)?;
+
+    Ok(process_list().current().write().add_open_file(node.upgrade().unwrap()))
+}
+
+pub fn close(fd: usize) -> Result<()> {
+    process_list().current().write().close_file(fd).map_err(|_| SyscallError::InvalidFd)
+}
+
+pub fn read(fd: usize, buffer: &mut [u8]) -> Result<usize> {
+    let current = process_list().current();
+    let lock = current.read();
+    let vnode = lock.open_files.get(&fd).ok_or(SyscallError::InvalidFd)?;
+
+    vnode.read(buffer).map_err(|_| SyscallError::FsError)
+}
+
+pub fn write(fd: usize, buffer: &[u8]) -> Result<usize> {
+    let current = process_list().current();
+    let lock = current.read();
+    let vnode = lock.open_files.get(&fd).ok_or(SyscallError::InvalidFd)?;
+
+    vnode.write(buffer).map_err(|_| SyscallError::FsError)
 }

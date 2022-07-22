@@ -10,6 +10,9 @@ pub enum SyscallError {
     /// Memeory mapping does not exists or OOM
     NoMem = -4,
     InvalidFlags = -5,
+    InvalidPath = -6,
+    InvalidFd = -7,
+    FsError = -8,
 }
 
 pub const OK_VAL: isize = 0;

@@ -1,3 +1,5 @@
+use core::ffi::c_char;
+
 use super::number::Syscall;
 use super::{syscall0, syscall1, syscall2, syscall3};
 
@@ -47,5 +49,45 @@ pub extern "C" fn munmap(ptr: *const u8, pages: usize) -> isize {
 pub extern "C" fn mprotect(ptr: *const u8, pages: usize, prot: usize) -> isize {
     unsafe {
         syscall3(Syscall::MPROTECT, ptr as usize, pages, prot)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn open(path: *const c_char) -> isize {
+    unsafe {
+        syscall2(Syscall::OPEN, path as usize, c_str_len(path))
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn close(fd: usize) -> isize {
+    unsafe {
+        syscall1(Syscall::CLOSE, fd)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn read(fd: usize, buffer: *mut u8, len: usize) -> isize {
+    unsafe {
+        syscall3(Syscall::READ, fd, buffer as usize, len)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn write(fd: usize, buffer: *const u8, len: usize) -> isize {
+    unsafe {
+        syscall3(Syscall::WRITE, fd, buffer as usize, len)
+    }
+}
+
+unsafe fn c_str_len(ptr: *const c_char) -> usize {
+    let mut count = 0;
+
+    loop {
+        if ptr.add(count).read() == 0 {
+            return count;
+        }
+
+        count += 1;
     }
 }

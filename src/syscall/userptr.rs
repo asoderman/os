@@ -33,6 +33,12 @@ impl UserPtr {
 
         core::slice::from_raw_parts(ptr, len)
     }
+
+    pub unsafe fn write_bytes(&self, len: usize) -> &mut [u8] {
+        let ptr = self.0.as_mut_ptr() as *mut u8;
+
+        core::slice::from_raw_parts_mut(ptr, len)
+    }
 }
 
 impl TryFrom<usize> for UserPtr {
