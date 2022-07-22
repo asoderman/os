@@ -1,6 +1,6 @@
 use super::{Error, FsError};
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 
 /// A Path type that wraps a heap allocated string and defines some common path operations
 #[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
@@ -94,6 +94,13 @@ impl Path {
     /// return value is a file versus a directory
     pub fn filename(&self) -> Option<&str> {
         self.components().last()
+    }
+
+    /// Removes the last entry in the provided path to create a parent path
+    pub fn parent(&self) -> Path {
+        let mut components: Vec<&str> = self.components().collect();
+        let _filename = components.pop();
+        Path::from_components(components.into_iter())
     }
 
     /// Checks if the path is relative

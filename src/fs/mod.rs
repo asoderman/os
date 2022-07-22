@@ -94,9 +94,9 @@ fn init_devfs() {
 
     let serial_device = crate::dev::serial::generic_serial_device();
 
-    dev_fs.write().insert_node(Path::from_str("/dev/serial"), serial_device.into()).expect("Could not create serial device file");
+    rootfs().write().mount_filesystem(dev_fs.clone(), Path::from_str("/dev")).expect("Could not create ramfs");
 
-    rootfs().write().mount_filesystem(dev_fs, Path::from_str("/dev")).expect("Could not create ramfs");
+    dev_fs.write().insert_node(Path::from_str("/dev/serial"), serial_device.into()).expect("Could not create serial device file");
 }
 
 pub fn init() {

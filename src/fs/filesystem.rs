@@ -28,7 +28,7 @@ pub(super) trait FileSystem: Debug + Send + Sync {
 
     fn exists(&self, path: &Path) -> bool;
 
-    fn read_dir(&self, path: Path) -> Result<Box<dyn Iterator<Item=Path>>, Error>;
+    fn read_dir(&self, path: Path) -> Result<Box<dyn ExactSizeIterator<Item=Path>>, Error>;
     fn create_dir(&mut self, path: Path) -> Result<(), Error>;
     fn remove_dir(&mut self, path: Path) -> Result<(), Error>;
 

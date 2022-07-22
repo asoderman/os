@@ -4,7 +4,9 @@ use spin::RwLock;
 use super::{Path, FileSystem, FSAttributes, Error, file::{File, FileAttributes, Read, Write, VirtualNode}, FsError};
 use super::filesystem::FsType;
 
-/// An in memory (only) filesystem
+/// An in memory (only) filesystem. The file system can accomodate any virtual node and will behave
+/// like a simple unix file system but the filesystem itself is not backed by any persistent
+/// storage
 #[derive(Debug)]
 pub struct RamFs {
     files: BTreeMap<Path, VirtualNode>,
@@ -17,6 +19,12 @@ impl RamFs {
             files: BTreeMap::new(),
             root: Path::empty(),
         }
+    }
+
+    pub fn parent_exists(&self, path: &Path) -> bool {
+        let mut parent = path.parent();
+        parent.remove_trailing_slash();
+        self.root == parent || self.exists(&parent)
     }
 }
 
@@ -52,15 +60,18 @@ impl FileSystem for RamFs {
         self.files.contains_key(path)
     }
 
-    fn read_dir(&self, path: Path) -> Result<alloc::boxed::Box<dyn Iterator<Item=Path>>, Error> {
+    fn read_dir(&self, path: Path) -> Result<alloc::boxed::Box<dyn ExactSizeIterator<Item=Path>>, Error> {
         if path == self.root {
             let all: Vec<_> = self.files.iter().map(|(path, _)| path.clone()).collect();
             return Ok(Box::new(all.into_iter()));
         }
         let mut path_exists = false;
         let filtered: Vec<_> = self.files.iter().filter_map(|(p, _)| {
-            if p.starts_with(&path) {
+            // Don't include the directory path in read results
+            if p.eq(&path) {
                 path_exists = true;
+                None
+            } else if p.starts_with(&path) {
                 Some(p.clone())
             } else {
                 None
@@ -74,9 +85,9 @@ impl FileSystem for RamFs {
         }
     }
 
-    fn create_dir(&mut self, mut path: Path) -> Result<(), Error> {
-        if !path.starts_with(&self.root) {
-            path = self.root.join(&path)
+    fn create_dir(&mut self, path: Path) -> Result<(), Error> {
+        if !self.parent_exists(&path) {
+            Err(FsError::Exists)?
         }
         if self.files.insert(path, VirtualNode::Directory).is_some() {
             Err(FsError::Exists)
@@ -94,6 +105,9 @@ impl FileSystem for RamFs {
     }
 
     fn create_file(&mut self, path: Path) -> Result<(), Error> {
+        if !self.parent_exists(&path) {
+            Err(FsError::Exists)?
+        }
         if self.files.insert(path, VirtualNode::new_file::<MemoryFile>()).is_some() {
             Err(FsError::Exists)
         } else {
@@ -114,7 +128,9 @@ impl FileSystem for RamFs {
     }
 
     fn insert_node(&mut self, path: Path, node: VirtualNode) -> Result<(), Error> {
-        // TODO: check if path is correct e.g. parent exists
+        if !self.parent_exists(&path) {
+            Err(FsError::Exists)?
+        }
         if self.files.insert(path, node).is_none() {
             Ok(())
         } else {
@@ -223,7 +239,7 @@ mod test {
     fn test_create_and_remove_dir() {
         let mut test_fs = test_fs();
 
-        let create_result = test_fs.create_dir(Path::from_str("new"));
+        test_fs.create_dir(Path::from_str("/test/new")).expect("Could not create a test directory");
 
         let subpaths = test_fs.read_dir(test_fs.root().unwrap()).map(|i| i.collect());
 
@@ -231,7 +247,6 @@ mod test {
 
         let subpaths: Vec<_> = subpaths.unwrap();
 
-        assert!(create_result.is_ok());
         assert_eq!(subpaths.len(), 1);
         // Check that the expected path is in the results
         let created_dir = subpaths.into_iter().find(|p| p == &test_root_path().join(&Path::from_str("new")));
@@ -242,7 +257,7 @@ mod test {
     fn test_create_and_remove_file() {
         let mut test_fs = test_fs();
 
-        let test_path = Path::from_str("foo");
+        let test_path = Path::from_str("/test/foo");
 
         assert_eq!(test_fs.attributes().unwrap().files, 0);
         test_fs.create_file(test_path.clone()).unwrap();
@@ -255,7 +270,7 @@ mod test {
     #[test_case]
     fn test_read_and_write_file() {
         let mut test_fs = test_fs();
-        let test_path = Path::from_str("foo");
+        let test_path = Path::from_str("/test/foo");
         let test_data = "hello world".as_bytes();
 
         test_fs.create_file(test_path.clone()).unwrap();
@@ -272,5 +287,21 @@ mod test {
         let read_string = String::from_utf8(read_buffer[0..bytes_read].to_vec()).unwrap();
 
         assert_eq!(read_string, "hello world");
+    }
+
+    #[test_case]
+    fn test_directory() {
+        let mut test_fs = test_fs();
+        let test_dir = Path::from_str("/test/foo");
+        let test_file = Path::from_str("/test/foo/file");
+
+        test_fs.create_dir(test_dir.clone()).expect("Could not create test directory");
+        test_fs.create_file(test_file).expect("Could not create test file in test dir");
+
+        let test_dir_contents = test_fs.read_dir(test_dir).unwrap();
+
+        assert!(test_dir_contents.len() == 1, "test dir did not contain exactly 1 item after file creation");
+
+        test_fs.create_file(Path::from_str("/test/bad_dir/file")).expect_err("RamFs allowed creation of file in a directory that does not exist");
     }
 }
