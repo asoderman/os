@@ -1,11 +1,15 @@
+use crate::arch::VirtAddr;
+
 use super::{Error, FsError, file::{File, Write, Read}};
 
-/// A generic file that is able to expose kernel functions to userspace
+/// A generic file that is able to expose kernel functions to userspace via file operations
+#[derive(Default)]
 pub struct GenericFile {
-    pub open_impl: fn() -> Result<(), FsError>,
-    pub close_impl: fn() -> Result<(), FsError>,
-    pub read_impl: fn(&mut [u8]) -> Result<usize, FsError>,
-    pub write_impl: fn(&[u8]) -> Result<usize, FsError>,
+    pub open_impl: Option<fn() -> Result<(), FsError>>,
+    pub close_impl: Option<fn() -> Result<(), FsError>>,
+    pub read_impl: Option<fn(&mut [u8]) -> Result<usize, FsError>>,
+    pub write_impl: Option<fn(&[u8]) -> Result<usize, FsError>>,
+    pub mmap_impl: Option<fn(VirtAddr) -> Result<VirtAddr, FsError>>
 }
 
 impl core::fmt::Debug for GenericFile {
@@ -14,26 +18,23 @@ impl core::fmt::Debug for GenericFile {
     }
 }
 
-impl Default for GenericFile {
-    fn default() -> Self {
-        Self {
-            open_impl: || { Ok(()) },
-            close_impl: || { Ok(()) },
-            read_impl: |_| { Err(FsError::InvalidAccess) },
-            write_impl: |_| { Err(FsError::InvalidAccess) },
-        }
-    }
-}
-
 impl Read for GenericFile {
     fn read(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        (self.read_impl)(buf)
+        if let Some(handler) = self.read_impl {
+            handler(buf)
+        } else {
+            Err(FsError::InvalidAccess)
+        }
     }
 }
 
 impl Write for GenericFile {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
-        (self.write_impl)(buf)
+        if let Some(handler) = self.write_impl {
+            handler(buf)
+        } else {
+            Err(FsError::InvalidAccess)
+        }
     }
 }
 
@@ -50,3 +51,4 @@ impl File for GenericFile {
         todo!()
     }
 }
+

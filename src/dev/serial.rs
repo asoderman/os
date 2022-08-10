@@ -122,11 +122,11 @@ impl Log for SerialRef {
 pub fn generic_serial_device() -> GenericFile {
     let mut file = GenericFile::default();
 
-    file.read_impl = |_buffer| { todo!() };
-    file.write_impl = |buffer| {
+    file.read_impl = Some(|_buffer| { todo!() });
+    file.write_impl = Some(|buffer| {
         SERIAL_OUT.lock().write(core::str::from_utf8(buffer).unwrap_or("SERIAL ERROR"));
         Ok(buffer.len())
-    };
+    });
 
     file
 }
