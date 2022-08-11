@@ -17,9 +17,7 @@ pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> im
     info!("Syscall no. : {:#X}", a);
     match a {
         Syscall::OPEN => {
-            unsafe {
-                open(UserPtr::try_from(b)?.read_bytes(c)).map(|a| a as isize)
-            }
+            open(UserPtr::try_from(b)?.to_path(c)?).map(|a| a as isize)
         },
         Syscall::CLOSE => close(b).map(|_| OK_VAL),
         Syscall::READ => {
@@ -32,6 +30,18 @@ pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> im
                 write(b, UserPtr::try_from(c)?.read_bytes(d)).map(|a| a as isize)
             }
         },
+        Syscall::MKDIR => {
+            mkdir(UserPtr::try_from(b)?.to_path(c)?).map(|_| OK_VAL)
+        }
+        Syscall::RMDIR => {
+            rmdir(UserPtr::try_from(b)?.to_path(c)?).map(|_| OK_VAL)
+        }
+        Syscall::MKFILE => {
+            mkfile(UserPtr::try_from(b)?.to_path(c)?).map(|_| OK_VAL)
+        }
+        Syscall::RMFILE => {
+            rmfile(UserPtr::try_from(b)?.to_path(c)?).map(|_| OK_VAL)
+        }
         Syscall::SLEEP => sleep(b).map(|_| OK_VAL),
         Syscall::YIELD => yield_().map(|_| OK_VAL),
         Syscall::EXIT => do_exit(b),

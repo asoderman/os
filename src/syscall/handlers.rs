@@ -123,8 +123,7 @@ pub fn log_print(ptr: UserPtr, len: usize) -> Result<()> {
     Ok(())
 }
 
-pub fn open(path: &[u8]) -> Result<usize> {
-    let path = Path::new(path).map_err(|_| SyscallError::InvalidPath)?;
+pub fn open(path: Path) -> Result<usize> {
     log::info!("Opening: {:?}", path);
     let node = rootfs().read().get_file(&path).map_err(|_| SyscallError::Exist)?;
 
@@ -149,4 +148,20 @@ pub fn write(fd: usize, buffer: &[u8]) -> Result<usize> {
     let vnode = lock.open_files.get(&fd).ok_or(SyscallError::InvalidFd)?;
 
     vnode.write(buffer).map_err(|_| SyscallError::FsError)
+}
+
+pub fn mkdir(path: Path) -> Result<()> {
+    rootfs().read().create_dir(&path).map_err(|_| SyscallError::FsError)
+}
+
+pub fn rmdir(path: Path) -> Result<()> {
+    rootfs().read().remove_dir(&path).map_err(|_| SyscallError::FsError)
+}
+
+pub fn mkfile(path: Path) -> Result<()> {
+    rootfs().read().create_file(&path).map_err(|_| SyscallError::FsError)
+}
+
+pub fn rmfile(path: Path) -> Result<()> {
+    rootfs().read().remove_file(&path).map_err(|_| SyscallError::FsError)
 }
