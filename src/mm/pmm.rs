@@ -172,7 +172,7 @@ pub unsafe fn get_phys_as_mut<'t, T>(addr: PhysAddr) -> Option<&'t mut T> {
     ptr.as_mut()
 }
 
-pub(super) fn init_phys_offset(offset: usize) {
+pub fn init_phys_offset(offset: usize) {
     PHYS_OFFSET.call_once(|| offset);
 }
 

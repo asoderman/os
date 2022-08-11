@@ -1,4 +1,6 @@
-use crate::{arch::{VirtAddr, PAGE_SIZE}, mm::VirtualRegion};
+use crate::arch::x86_64::paging::Mapper;
+use crate::arch::{VirtAddr, PhysAddr, PAGE_SIZE};
+use crate::mm::{VirtualRegion, phys_to_virt, init_phys_offset};
 
 use core::ptr::addr_of;
 use alloc::boxed::Box;
@@ -21,16 +23,31 @@ pub struct KernelEnv {
 #[derive(Debug)]
 pub struct Video {
     pub frame_buffer: VirtAddr,
+    pub frame_buffer_phys: PhysAddr,
+    pub frame_buffer_page_size: usize,
     pub size: usize,
     pub height: usize,
     pub width: usize
 }
 
 pub fn init(bootinfo: &KernelInfo) {
+
+    init_phys_offset(bootinfo.phys_offset as usize);
+
     // Copy the memory map to the heap
     let memory_map = bootinfo.mem_map_info.get_memory_map().to_vec().into_boxed_slice();
 
     init_memory_regions(&bootinfo);
+
+    // Gather fb phys address
+    let fb_vaddr = VirtAddr::new(bootinfo.video_info.frame_buffer as u64);
+    let (frame_buffer_phys, is_huge) = fb_phys_addr(fb_vaddr);
+
+    let frame_buffer_page_size = if is_huge {
+        crate::arch::x86_64::PageSize::_2Mb.into()
+    } else {
+        PAGE_SIZE
+    };
 
     KERNEL_ENV.call_once(|| {
         KernelEnv {
@@ -42,6 +59,8 @@ pub fn init(bootinfo: &KernelInfo) {
 
             video: Some(Video {
                 frame_buffer: VirtAddr::new(bootinfo.video_info.frame_buffer as u64),
+                frame_buffer_phys,
+                frame_buffer_page_size,
                 size: bootinfo.video_info.frame_buffer_size as usize,
                 height: bootinfo.video_info.height as usize,
                 width: bootinfo.video_info.width as usize
@@ -53,6 +72,7 @@ pub fn init(bootinfo: &KernelInfo) {
 pub fn env<'env>() -> &'env KernelEnv {
     KERNEL_ENV.get().expect("KernelEnv not initialized!")
 }
+
 extern "C" {
     static __kernel_code_start: u8;
     static __kernel_code_end: u8;
@@ -115,6 +135,22 @@ fn init_memory_regions(bootinfo: &KernelInfo) {
         }
     );
 
+}
+
+/// Returns the physical address of the framebuffer and whether or not it uses a huge page
+fn fb_phys_addr(fb: VirtAddr) -> (PhysAddr, bool) {
+    log::info!("Getting fb phys addr");
+    use x86_64::structures::paging::PageTable;
+    let pt = unsafe {
+        let paddr = x86_64::registers::control::Cr3::read_raw().0.start_address();
+        let vaddr = phys_to_virt(paddr);
+        let ptr = vaddr.as_mut_ptr() as *mut PageTable;
+        ptr.as_mut().expect("Page table null ptr")
+    };
+    log::info!("pt: {:p}", pt);
+    let res = Mapper::new(fb, pt).get_phys_frame();
+    log::info!("{:?}", res);
+    res.expect("Could not get the physical address of the frame buffer")
 }
 
 /// Returns various constants about the address space

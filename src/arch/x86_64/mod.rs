@@ -2,6 +2,21 @@ pub const PAGE_SIZE: usize = 4096;
 
 pub use x86_64::{PhysAddr, VirtAddr};
 
+#[derive(Debug, Clone, Copy)]
+pub enum PageSize {
+    _4Kb,
+    _2Mb
+}
+
+impl Into<usize> for PageSize {
+    fn into(self) -> usize {
+        match self {
+            PageSize::_4Kb => PAGE_SIZE,
+            PageSize::_2Mb => 0x200 * PAGE_SIZE,
+        }
+    }
+}
+
 pub mod context;
 pub mod cpu;
 pub mod idt;
