@@ -146,6 +146,8 @@ fn panic(info: &PanicInfo) -> ! {
     // fault in try_apic_id
     interrupt::disable_interrupts();
     proc::PANIC.store(true, core::sync::atomic::Ordering::SeqCst);
+    dev::serial::force_serial_unlock();
+
     write_serial_out("KERNEL PANIC ");
     let core = arch::x86_64::try_apic_id();
     println!("on core {:?}: {}", core, info);

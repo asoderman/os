@@ -12,6 +12,8 @@ use crate::syscall::userptr::UserPtr;
 
 use syscall::error::OK_VAL;
 
+/// This function takes the state of the syscall as input then performs the necessary
+/// validation/type conversions and finally invokes the matching syscall handler
 #[allow(unused_variables)]
 pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> impl NumericResult {
     info!("Syscall no. : {:#X}", a);
@@ -47,7 +49,7 @@ pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> im
         Syscall::EXIT => do_exit(b),
         Syscall::LOGPRINT => log_print(UserPtr::try_from(b)?, c).map(|_| OK_VAL),
         Syscall::MMAP => {
-            mmap(UserPtr::try_from(b).unwrap(), c, MemoryFlags::from_bits(d).ok_or(SyscallError::InvalidFlags).unwrap())
+            mmap(UserPtr::try_from(b).unwrap(), c, MemoryFlags::from_bits(d).ok_or(SyscallError::InvalidFlags).unwrap(), e)
         },
         Syscall::MUNMAP => {
             munmap(UserPtr::try_from(b)?, c)

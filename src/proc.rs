@@ -11,7 +11,7 @@ use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::arch::x86_64::context::enter_user;
 use crate::elf::Loader;
-use crate::fs::VirtualNode;
+use crate::fs::{VirtualNode, null_device};
 use crate::interrupt::{enable_and_halt, disable_interrupts, without_interrupts, restore_interrupts};
 use crate::mm::AddressSpace;
 use crate::stack::{KernelStack, UserStack};
@@ -199,6 +199,10 @@ impl Task {
 
         let mut open_files = BTreeMap::new();
 
+        open_files.insert(0, null_device().into());
+        open_files.insert(1, null_device().into());
+        open_files.insert(2, null_device().into());
+
         info!("New task {} created", id);
 
         Arc::new(RwLock::new(Task {
@@ -305,6 +309,7 @@ pub fn process_list_mut<'l>() -> RwLockWriteGuard<'l, ProcessList> {
 
 static TEST_ELF: &[u8] = include_bytes!("../target/userspace/test_user");
 static TEST_FS: &[u8] = include_bytes!("../target/userspace/test_fs");
+static TEST_FB: &[u8] = include_bytes!("../target/userspace/test_fb");
 
 extern "C" fn load_elf() {
     process_list().current().write().load_elf(TEST_ELF).unwrap();
@@ -312,6 +317,10 @@ extern "C" fn load_elf() {
 
 extern "C" fn load_elf_fs_test() {
     process_list().current().write().load_elf(TEST_FS).unwrap();
+}
+
+extern "C" fn load_elf_fb_test() {
+    process_list().current().write().load_elf(TEST_FB).unwrap();
 }
 
 pub fn new_user_test() {
@@ -322,6 +331,11 @@ pub fn new_user_test() {
 
     let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
     task.write().arch_context.push(load_elf_fs_test as usize);
+
+    process_list_mut().insert(task).unwrap();
+
+    let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
+    task.write().arch_context.push(load_elf_fb_test as usize);
 
     process_list_mut().insert(task).unwrap();
 }

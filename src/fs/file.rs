@@ -14,7 +14,7 @@ pub trait File: Read + Write + Debug + Send + Sync {
         Ok(())
     }
     fn content(&self) -> Result<&[u8], Error>;
-    fn mmap(&self) -> Result<VirtAddr, Error> {
+    fn mmap(&self, vaddr: VirtAddr) -> Result<VirtAddr, Error> {
         Err(FsError::InvalidAccess)
     }
     fn position(&self) -> usize;
@@ -107,6 +107,16 @@ impl VirtualNode {
         if let VirtualNode::File(file_node) = self {
             let mut node = file_node.clone();
             node.write(buffer)
+        } else {
+            Err(FsError::InvalidAccess)
+        }
+    }
+
+    pub fn mmap(&self, vaddr: VirtAddr) -> Result<VirtAddr, Error> {
+        if let VirtualNode::File(file_node) = self {
+            let res = file_node.file.write().mmap(vaddr);
+            log::info!("mmaped file to: {:?}", res);
+            res
         } else {
             Err(FsError::InvalidAccess)
         }

@@ -3,6 +3,7 @@ use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use spin::Mutex;
 use x86_64::structures::paging::PageTable;
+use crate::arch::x86_64::PageSize;
 use crate::arch::{VirtAddr, PhysAddr, PAGE_SIZE};
 use crate::env::memory_layout;
 use core::fmt::Debug;
@@ -37,8 +38,14 @@ impl VirtualRegion {
     }
 
     /// Returns an iterator of each starting virtual address in the range
-    pub fn pages(&self) -> impl IntoIterator<Item=VirtAddr> {
+    pub fn pages(&self) -> impl Iterator<Item = VirtAddr> {
         (self.start.as_u64()..self.region_end() as u64).step_by(PAGE_SIZE).map(|addr| VirtAddr::new(addr))
+    }
+
+    pub fn huge_pages(&self) -> impl Iterator<Item = VirtAddr> {
+        let huge_page_size: usize = PageSize::_2Mb.into();
+        (self.start.as_u64()..self.region_end() as u64).step_by(huge_page_size).map(|addr| VirtAddr::new(addr))
+
     }
 
     pub fn end(&self) -> VirtAddr {
@@ -168,14 +175,25 @@ impl AddressSpace {
         addr_space
     }
 
-    pub(super) fn page_table(&mut self) -> &mut PageTable {
+    pub fn page_table(&mut self) -> &mut PageTable {
         unsafe {
             self.page_table.as_mut()
         }
     }
 
+    /// Returns the physical address of the backing page table
     pub fn phys_addr(&self) -> PhysAddr {
         virt_to_phys(VirtAddr::new(self.page_table.as_ptr() as u64))
+    }
+
+    /// Query the address space if a particular address is valid
+    pub fn address_mapped(&self, addr: VirtAddr) -> bool {
+        for mapping in self.mappings.iter() {
+            if mapping.virt_range().contains_val(addr.as_u64() as usize) {
+                return true
+            }
+        }
+        false
     }
 
     pub(super) fn insert_and_map(&mut self, mut mapping: Mapping, frame_allocator: &mut impl FrameAllocator) -> Result<Arc<Mapping>, Error> {
@@ -283,7 +301,7 @@ pub fn mmio_area_start() -> VirtAddr {
     (memory_layout().phys_memory_start + ((memory_layout().phys_memory_size + 1) * PAGE_SIZE as u64)).align_up(0x1000000u64)
 }
 
-pub(super) fn get_kernel_context_virt<'kernel>() -> &'kernel Mutex<AddressSpace> {
+pub fn get_kernel_context_virt() -> &'static Mutex<AddressSpace> {
     &KERNEL_ADDRESS_SPACE
 }
 

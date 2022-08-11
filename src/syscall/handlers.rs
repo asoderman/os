@@ -47,12 +47,20 @@ pub fn do_exit(status: usize) -> Result<isize> {
     Ok(0)
 }
 
-pub fn mmap(addr: UserPtr, pages: usize, flags: MemoryFlags) -> Result<isize> {
+pub fn mmap(addr: UserPtr, pages: usize, flags: MemoryFlags, fd: usize) -> Result<isize> {
+    log::info!("mmapping fd: {}", fd);
     let current = process_list().current();
-    log::info!("flags: {:08b}", flags);
-    user_map(&mut *current.write(), addr.addr(), pages).map_err(|_| SyscallError::Exist)?;
-
-    Ok(pages as isize)
+    if fd < 3 && flags.contains(MemoryFlags::ANONYMOUS) {
+        user_map(&mut *current.write(), addr.addr(), pages).map_err(|_| SyscallError::Exist)?;
+        Ok(pages as isize)
+    } else {
+        let lock = current.read();
+        let file = lock.open_files.get(&fd).ok_or(SyscallError::InvalidFd)?.clone();
+        drop(lock);
+        let vaddr = file.mmap(addr.addr()).map_err(|_| SyscallError::InvalidFd)?;
+        log::info!("vaddr: {:?}", vaddr);
+        Ok(0)
+    }
 }
 
 pub fn munmap(addr: UserPtr, pages: usize) -> Result<isize> {

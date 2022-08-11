@@ -93,6 +93,15 @@ pub fn set_serial_logger() {
     log::set_logger(&SERIAL_REF).unwrap();
 }
 
+/// Attempts to force unlock the serial port when the kernel panics to allow error reporting
+pub fn force_serial_unlock() {
+    assert!(crate::proc::PANIC.load(core::sync::atomic::Ordering::SeqCst),
+        "Attempted to unlock the serial port while not in panic");
+    unsafe {
+        SERIAL_REF.0.force_unlock()
+    }
+}
+
 impl Log for SerialRef {
     fn enabled(&self, _metadata: &log::Metadata) -> bool {
         crate::heap::HEAP_READY.is_completed()
@@ -122,11 +131,11 @@ impl Log for SerialRef {
 pub fn generic_serial_device() -> GenericFile {
     let mut file = GenericFile::default();
 
-    file.read_impl = |_buffer| { todo!() };
-    file.write_impl = |buffer| {
+    file.read_impl = Some(|_buffer| { todo!() });
+    file.write_impl = Some(|buffer| {
         SERIAL_OUT.lock().write(core::str::from_utf8(buffer).unwrap_or("SERIAL ERROR"));
         Ok(buffer.len())
-    };
+    });
 
     file
 }

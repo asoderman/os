@@ -23,7 +23,7 @@ intptr_t sleep(uintptr_t seconds);
 
 intptr_t yield_(void);
 
-intptr_t mmap(const uint8_t *ptr, uintptr_t pages, uintptr_t flags);
+intptr_t mmap(const uint8_t *ptr, uintptr_t pages, uintptr_t flags, uintptr_t fd);
 
 intptr_t munmap(const uint8_t *ptr, uintptr_t pages);
 

@@ -253,7 +253,7 @@ impl<'a> Mapper<'a> {
     pub fn unmap(&mut self, frame_allocator: &mut impl FrameAllocator, cleanup: bool) -> Result<PhysAddr, MapError> {
         loop {
             match self.advance() {
-                Err(MapError::BottomLevel) => break,
+                Err(MapError::BottomLevel) | Err(MapError::HugeFrame(_)) => break,
                 Ok(()) => (),
                 _ => Err(MapError::NotPresent)?,
             }
@@ -286,14 +286,16 @@ impl<'a> Mapper<'a> {
     /// # Safety:
     /// Do not attempt to set the huge page flag via this method
     pub fn set_flags(&mut self, flags: PageTableFlags) -> Result<Flusher, MapError> {
+        assert!(!flags.contains(PageTableFlags::HUGE_PAGE));
         loop {
             if !self.next_entry().is_unused() {
-                // Always bitor with PRESENT since it should never be cleared while setting flags
-                // anyway
-                self.next_entry().set_flags(flags | PageTableFlags::PRESENT);
+
+                let next_flags = self.next_entry().flags();
+                self.next_entry().set_flags(flags | next_flags);
+
                 match self.advance() {
                     Err(MapError::NotPresent) => { unreachable!() },
-                    Err(MapError::BottomLevel) => { return Ok(Flusher(self.addr)) },
+                    Err(MapError::BottomLevel) | Err(MapError::HugeFrame(_))  => { return Ok(Flusher(self.addr)) },
                     _ => (),
                 }
             } else {
