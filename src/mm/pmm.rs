@@ -109,12 +109,15 @@ impl BitMapFrameAllocator {
             return new;
         }
 
+        unsafe {
+            (get_phys_as_mut(addr) as Option<&mut [u8; PAGE_SIZE]>).unwrap().fill(0);
+        }
+
         addr
     }
 }
 
 pub(super) fn init(heap_range: (VirtAddr, VirtAddr)) {
-    init_phys_offset(crate::env::memory_layout().phys_memory_start.as_u64() as usize);
     let mem_map = &crate::env::env().memory_map;
     PMM.call_once(|| {
         let mut pmm = BitMapFrameAllocator::uninit();
