@@ -181,8 +181,19 @@ impl AddressSpace {
         }
     }
 
+    /// Returns the physical address of the backing page table
     pub fn phys_addr(&self) -> PhysAddr {
         virt_to_phys(VirtAddr::new(self.page_table.as_ptr() as u64))
+    }
+
+    /// Query the address space if a particular address is valid
+    pub fn address_mapped(&self, addr: VirtAddr) -> bool {
+        for mapping in self.mappings.iter() {
+            if mapping.virt_range().contains_val(addr.as_u64() as usize) {
+                return true
+            }
+        }
+        false
     }
 
     pub(super) fn insert_and_map(&mut self, mut mapping: Mapping, frame_allocator: &mut impl FrameAllocator) -> Result<Arc<Mapping>, Error> {
