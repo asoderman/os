@@ -1,5 +1,7 @@
 use core::ffi::c_char;
 
+use crate::syscall4;
+
 use super::number::Syscall;
 use super::{syscall0, syscall1, syscall2, syscall3};
 
@@ -32,9 +34,9 @@ pub extern "C" fn yield_() -> isize {
 }
 
 #[no_mangle]
-pub extern "C" fn mmap(ptr: *const u8, pages: usize, flags: usize) -> isize {
+pub extern "C" fn mmap(ptr: *const u8, pages: usize, flags: usize, fd: usize) -> isize {
     unsafe {
-        syscall3(Syscall::MMAP, ptr as usize, pages, flags)
+        syscall4(Syscall::MMAP, ptr as usize, pages, flags, fd)
     }
 }
 

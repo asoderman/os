@@ -6,7 +6,6 @@ intptr_t exit(uintptr_t status);
 intptr_t k_log(const uint8_t *ptr, uintptr_t len);
 intptr_t sleep(uintptr_t seconds);
 
-intptr_t mmap(const uint8_t *ptr, uintptr_t pages, uintptr_t flags);
 intptr_t munmap(const uint8_t *ptr, uintptr_t pages);
 intptr_t mprotect(const uint8_t *ptr, uintptr_t pages, uintptr_t prot);
 
@@ -37,7 +36,7 @@ int main(void) {
     uint64_t pages = 4;
     uint8_t* addr = (uint8_t*) 0xFC000;
 
-    print_status(mmap(addr, pages, MemoryFlags_DEFAULT.bits));
+    print_status(mmap(addr, pages, MemoryFlags_DEFAULT.bits, 0));
 
     string_copy(msg, (char*) addr, len);
     sleep(6);

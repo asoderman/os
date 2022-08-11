@@ -1,9 +1,10 @@
+use alloc::vec::Vec;
 use log::warn;
 use spin::RwLock;
 use x86_64::{structures::paging::{PageTable, PageTableFlags}, VirtAddr};
 
 use super::{vmm::{VirtualRegion, VirtualMemoryError}, frame_allocator::FrameAllocator, AddressSpace};
-use crate::arch::{PhysAddr, x86_64::paging::{Mapper, MapError}, PAGE_SIZE};
+use crate::arch::{PhysAddr, x86_64::{paging::{Mapper, MapError}, PageSize}, PAGE_SIZE};
 
 use bitflags::bitflags;
 
@@ -174,7 +175,13 @@ impl Mapping {
     }
 
     pub fn mark_as_userspace(&self, pt: &mut PageTable) {
-        for p in self.range.pages() {
+        let pages: Vec<VirtAddr> =
+        if !self.is_huge() {
+            self.virt_range().pages().collect()
+        } else {
+            self.virt_range().huge_pages().collect()
+        };
+        for p in pages {
             let mut mapper = Mapper::new(p, pt);
             mapper.set_flags(PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE).unwrap();
         }
@@ -185,8 +192,10 @@ impl Mapping {
         match self.kind {
             MappingType::MMIO(paddr) | MappingType::Identity(paddr) => {
                 if self.is_huge() {
-                    let start = self.range.start;
-                    Mapper::new(start, pt).map_huge_frame(paddr, frame_allocator)?;
+                    let huge_page_size: usize = PageSize::_2Mb.into();
+                    for (i, page) in self.virt_range().huge_pages().enumerate() {
+                        Mapper::new(page, pt).map_huge_frame(paddr + (i * huge_page_size), frame_allocator)?;
+                    }
                 } else {
                     for (i, page) in self.range.pages().into_iter().enumerate() {
                         Mapper::new(page, pt).map_frame(paddr + (i  * PAGE_SIZE), frame_allocator)?;
@@ -221,10 +230,16 @@ impl Mapping {
     }
 
     pub fn unmap(self, pt: &mut PageTable, frame_allocator: &mut impl FrameAllocator, cleanup: bool) -> Result<(), VirtualMemoryError> {
-        for (_i, page) in self.range.pages().into_iter().enumerate() {
-            let mut walker = Mapper::new(page, pt);
-
-            let frame = walker.unmap(frame_allocator, cleanup).unwrap();//.map_err(|_| VirtualMemoryError::UnmapNonPresent)?;
+        let pages: Vec<VirtAddr> =
+        // Must collect the iterators to satisfy the type checker
+        if self.is_huge() {
+            self.range.huge_pages().collect()
+        } else {
+            self.range.pages().collect()
+        };
+        for page in pages {
+            let mut mapper = Mapper::new(page, pt);
+            let frame = mapper.unmap(frame_allocator, cleanup).unwrap();
             match self.kind {
                 // Dont return a MMIO frame to pmm because it can't be used like normal memory
                 MappingType::MMIO(_) => (),

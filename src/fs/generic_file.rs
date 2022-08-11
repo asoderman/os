@@ -39,6 +39,15 @@ impl Write for GenericFile {
 }
 
 impl File for GenericFile {
+
+    fn mmap(&self, vaddr: VirtAddr) -> Result<VirtAddr, Error> {
+        if let Some(handler) = self.mmap_impl {
+            handler(vaddr)
+        } else {
+            Err(FsError::InvalidAccess)
+        }
+    }
+
     fn content(&self) -> Result<&[u8], Error> {
         todo!()
     }

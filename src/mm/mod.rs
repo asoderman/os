@@ -5,7 +5,8 @@ mod pmm;
 mod region;
 mod vmm;
 
-use crate::arch::{PhysAddr, VirtAddr};
+use crate::arch::x86_64::PageSize;
+use crate::arch::{PhysAddr, VirtAddr, PAGE_SIZE};
 use crate::proc::Task;
 use alloc::sync::Arc;
 use log::trace;
@@ -19,8 +20,8 @@ use self::mapping::Mapping;
 use self::pmm::physical_memory_manager;
 use self::vmm::{VirtualMemoryError, get_kernel_context_virt};
 
-pub use self::vmm::{VirtualRegion, AddressSpace};
-pub use self::pmm::{write_physical, write_physical_slice, get_phys_as_mut};
+pub use self::vmm::{VirtualRegion, AddressSpace, };
+pub use self::pmm::{write_physical, write_physical_slice, get_phys_as_mut, init_phys_offset};
 
 type Error = MemoryManagerError;
 
@@ -51,7 +52,10 @@ unsafe fn map_mmio(addr_space: &mut AddressSpace, vaddr: VirtAddr, paddr: PhysAd
 }
 
 unsafe fn map_huge_mmio(addr_space: &mut AddressSpace,  vaddr: VirtAddr, paddr: PhysAddr, size: usize) -> Result<MapHandle, Error> {
-    let region = vmm::VirtualRegion::new(vaddr, size);
+    log::trace!("Huge mmio mapping {:?} -> {:?}", vaddr, paddr);
+    let _2mb: usize = PageSize::_2Mb.into();
+    let size_bytes = size * _2mb;
+    let region = vmm::VirtualRegion::new(vaddr, size_bytes / PAGE_SIZE);
 
     let mapping = mapping::Mapping::new_mmio(region, paddr, true);
 
@@ -90,7 +94,7 @@ pub unsafe fn user_map_mmio_anywhere(task: &mut Task, paddr: PhysAddr, pages: us
 pub unsafe fn user_map_huge_mmio_anywhere(task: &mut Task, paddr: PhysAddr, pages: usize) -> Result<MapHandle, Error> {
     let addr_space = task.address_space.as_mut().unwrap();
     let vaddr = addr_space
-        .first_available_addr_above(VirtAddr::new(0), pages)
+        .first_available_addr_above(VirtAddr::new(0x80000000), pages)
         .ok_or(VirtualMemoryError::NoAddressSpaceAvailable)?;
     trace!("Mapping HUGE {:?} to userspace", vaddr);
     let mapping = unsafe {
