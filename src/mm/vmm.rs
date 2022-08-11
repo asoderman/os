@@ -175,7 +175,7 @@ impl AddressSpace {
         addr_space
     }
 
-    pub(super) fn page_table(&mut self) -> &mut PageTable {
+    pub fn page_table(&mut self) -> &mut PageTable {
         unsafe {
             self.page_table.as_mut()
         }

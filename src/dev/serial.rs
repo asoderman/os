@@ -93,6 +93,15 @@ pub fn set_serial_logger() {
     log::set_logger(&SERIAL_REF).unwrap();
 }
 
+/// Attempts to force unlock the serial port when the kernel panics to allow error reporting
+pub fn force_serial_unlock() {
+    assert!(crate::proc::PANIC.load(core::sync::atomic::Ordering::SeqCst),
+        "Attempted to unlock the serial port while not in panic");
+    unsafe {
+        SERIAL_REF.0.force_unlock()
+    }
+}
+
 impl Log for SerialRef {
     fn enabled(&self, _metadata: &log::Metadata) -> bool {
         crate::heap::HEAP_READY.is_completed()
