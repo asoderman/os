@@ -52,7 +52,8 @@ impl Loader for Task {
 
                     let pages = core::cmp::max(mem_size / PAGE_SIZE, 1);
 
-                    user_map(self, header_addr, pages).unwrap();
+                    // FIXME: allow overlapping mappings since headers can exist within the same page
+                    user_map(self, header_addr.align_down(0x1000u64), pages).unwrap();
 
                     trace!("v_offset: {:X} v_end: {:X}", virt_offset, virt_end);
                     let f_offset =  p_header.offset() as usize;
