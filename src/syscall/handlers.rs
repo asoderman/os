@@ -1,5 +1,4 @@
-use core::slice::from_raw_parts;
-
+use alloc::string::String;
 use alloc::sync::Arc;
 use syscall::error::SyscallError;
 use syscall::flags::MemoryFlags;
@@ -172,4 +171,9 @@ pub fn mkfile(path: Path) -> Result<()> {
 
 pub fn rmfile(path: Path) -> Result<()> {
     rootfs().read().remove_file(&path).map_err(|_| SyscallError::FsError)
+}
+
+pub fn execv(path: Path, args: String) -> Result <()> {
+    crate::proc::exec(path, args);
+    Ok(())
 }

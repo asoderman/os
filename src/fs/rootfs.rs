@@ -13,7 +13,6 @@ pub fn rootfs<'r>() -> &'r RwLock<RootFs> {
     &ROOT
 }
 
-
 #[derive(Debug, Default)]
 pub struct RootFs {
     file_systems: BTreeMap<Path, Arc<RwLock<dyn FileSystem>>>
@@ -62,6 +61,10 @@ impl RootFs {
     pub fn get_file(&self, path: &Path) -> Result<VirtualNode, Error> {
         self.fs_for_mountpoint(path).ok_or(FsError::Exists)?.read().get_file(path).map(|node| node.weak_clone())
 
+    }
+
+    pub fn insert_node(&self, path: Path, node: VirtualNode) -> Result<(), Error> {
+        self.fs_for_mountpoint(&path).ok_or(FsError::Exists)?.write().insert_node(path.clone(), node)
     }
 }
 

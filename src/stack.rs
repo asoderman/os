@@ -57,18 +57,6 @@ impl KernelStack {
         }
     }
 
-    /// Creates a stack used to initialize an ap. The object is never instantiated but we do not
-    /// want our new stack to be unmapped.
-    #[allow(dead_code)]
-    pub fn new_init() -> VirtAddr {
-        let init_stack = Self::new();
-        let rsp = init_stack.top();
-
-        core::mem::forget(rsp);
-
-        rsp
-    }
-
     /// Returns a `VirtAddr` to the top of the stack.
     pub fn top(&self) -> VirtAddr {
         self.base + (self.pages * PAGE_SIZE)

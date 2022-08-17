@@ -1,6 +1,7 @@
 use core::ptr::Unique;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use spin::Mutex;
 use x86_64::structures::paging::PageTable;
 use crate::arch::x86_64::PageSize;
@@ -107,6 +108,7 @@ pub enum VirtualMemoryError {
     NotPresent
 }
 
+/// An abstraction of OS memory book keeping and hardware memory management mechanisms
 #[derive(Debug)]
 pub struct AddressSpace {
     page_table: Unique<PageTable>,
@@ -115,14 +117,8 @@ pub struct AddressSpace {
 
 impl Drop for AddressSpace {
     fn drop(&mut self) {
-        // Remove all mappings from the user address space and attempt to unmap them if we own the
-        // sole reference
         crate::interrupt::without_interrupts(|| {
-            while let Some(m) = self.mappings.pop_first() {
-                if let Ok(mapping) = Arc::try_unwrap(m) {
-                    mapping.unmap(self.page_table(), &mut *physical_memory_manager().lock(), true).unwrap();
-                }
-            }
+            self.remove_all().expect("Could not cleanup dropped address space");
         });
     }
 }
@@ -194,6 +190,20 @@ impl AddressSpace {
             }
         }
         false
+    }
+
+    /// Remove all mappings from the user address space and attempt to unmap them if we own the
+    /// sole reference
+    pub fn remove_all(&mut self) -> Result<(), Error> {
+        while let Some(m) = self.mappings.pop_first() {
+            // FIXME: this will not unmapped shared memory even if that is the desired behavior
+            if let Ok(mapping) = Arc::try_unwrap(m) {
+                let range = mapping.virt_range().clone();
+                mapping.unmap(self.page_table(), &mut *physical_memory_manager().lock(), true).unwrap();
+            }
+        }
+
+        Ok(())
     }
 
     pub(super) fn insert_and_map(&mut self, mut mapping: Mapping, frame_allocator: &mut impl FrameAllocator) -> Result<Arc<Mapping>, Error> {

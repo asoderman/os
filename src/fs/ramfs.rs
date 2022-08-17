@@ -1,7 +1,7 @@
 use alloc::{vec::Vec, collections::BTreeMap, boxed::Box, sync::Arc};
 use spin::RwLock;
 
-use crate::time::DateTime;
+use crate::{time::DateTime, fs::GenericFile};
 
 use super::{Path, FileSystem, FSAttributes, Error, file::{File, FileAttributes, Read, Write, VirtualNode}, FsError};
 use super::filesystem::FsType;
@@ -223,7 +223,6 @@ pub fn init_ramfs() {
     use super::rootfs;
 
     let ramfs_vfs = Arc::new(RwLock::new(RamFs::new()));
-
     rootfs().write().mount_filesystem(ramfs_vfs, Path::from_str("/tmp")).expect("Could not create ramfs");
 }
 

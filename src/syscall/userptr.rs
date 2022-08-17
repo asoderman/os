@@ -1,5 +1,6 @@
+use alloc::string::String;
 use syscall::error::SyscallError;
-use crate::arch::VirtAddr;
+use crate::{arch::VirtAddr, fs::{Path, FsError}};
 
 pub struct UserPtr(VirtAddr);
 
@@ -38,6 +39,18 @@ impl UserPtr {
         let ptr = self.0.as_mut_ptr() as *mut u8;
 
         core::slice::from_raw_parts_mut(ptr, len)
+    }
+
+    pub fn to_path(&self, len: usize) -> Result<Path, SyscallError> {
+        unsafe {
+            Path::new(self.read_bytes(len)).map_err(|_| SyscallError::FsError)
+        }
+    }
+
+    pub fn to_string(&self, len: usize) -> Result<String, SyscallError> {
+        unsafe {
+            Ok(String::from_raw_parts(self.0.as_mut_ptr() as *mut u8, len, len))
+        }
     }
 }
 

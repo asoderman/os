@@ -1,10 +1,9 @@
 #include "include/syscall.h"
 
-// This is a small C program used to test filesystem syscalls from userland
 int main(void) {
 
     intptr_t serial = open(&"/dev/serial");
-    write(serial, &"User print\n", 11);
+    write(serial, &"Success!\n", 9);
 
     exit(0);
     return 0;

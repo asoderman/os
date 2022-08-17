@@ -30,3 +30,4 @@ syscall_number!(MKDIR, 12);
 syscall_number!(RMFILE, 13);
 syscall_number!(RMDIR, 14);
 syscall_number!(STAT, 15);
+syscall_number!(EXECV, 16);

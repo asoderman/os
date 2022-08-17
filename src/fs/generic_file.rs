@@ -7,6 +7,7 @@ use super::{Error, FsError, file::{File, Write, Read}};
 pub struct GenericFile {
     pub open_impl: Option<fn() -> Result<(), FsError>>,
     pub close_impl: Option<fn() -> Result<(), FsError>>,
+    pub contents_impl: Option<fn() -> &'static [u8]>,
     pub read_impl: Option<fn(&mut [u8]) -> Result<usize, FsError>>,
     pub write_impl: Option<fn(&[u8]) -> Result<usize, FsError>>,
     pub mmap_impl: Option<fn(VirtAddr) -> Result<VirtAddr, FsError>>
@@ -49,7 +50,11 @@ impl File for GenericFile {
     }
 
     fn content(&self) -> Result<&[u8], Error> {
-        todo!()
+        if let Some(handler) = self.contents_impl {
+            Ok(handler())
+        } else {
+            Err(FsError::InvalidAccess)
+        }
     }
 
     fn position(&self) -> usize {

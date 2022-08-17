@@ -37,4 +37,6 @@ intptr_t read(uintptr_t fd, uint8_t *buffer, uintptr_t len);
 
 intptr_t write(uintptr_t fd, const uint8_t *buffer, uintptr_t len);
 
+intptr_t execv(const char *path, const char *args);
+
 struct MemoryFlags mflags_empty(void);

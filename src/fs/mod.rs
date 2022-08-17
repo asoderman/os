@@ -1,9 +1,7 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
 use core::fmt::Debug;
 
 use alloc::string::FromUtf8Error;
 use alloc::sync::Arc;
-use alloc::{boxed::Box, vec::Vec};
 
 use crate::env::env;
 
@@ -12,6 +10,8 @@ pub use path::Path;
 mod file;
 mod filesystem;
 mod generic_file;
+#[macro_use]
+mod include;
 mod path;
 mod ramfs;
 mod rootfs;
@@ -25,6 +25,8 @@ pub use filesystem::FSAttributes;
 pub use rootfs::rootfs;
 
 use filesystem::FileSystem;
+
+use include::HostFile;
 
 use crate::mm::user_map_huge_mmio_anywhere;
 use crate::proc::process_list;
@@ -79,7 +81,22 @@ fn init_devfs() {
     dev_fs.write().insert_node(Path::from_str("/dev/fb"), fb_device.into()).expect("Could not create framebuffer device file");
 }
 
+/// Declare files to include in the kernel binary
+fn include_files() {
+    let _ = rootfs().read().create_dir(&Path::from_str("/tmp/include")).map_err(|e| {
+        log::warn!("{:?}", e);
+        e
+    });
+
+    include_file!("../../target/userspace/success");
+    include_file!("../../target/userspace/test_user");
+    include_file!("../../target/userspace/test_fs");
+    include_file!("../../target/userspace/test_fb");
+    include_file!("../../target/userspace/test_exec");
+}
+
 pub fn init() {
     ramfs::init_ramfs();
+    include_files();
     init_devfs();
 }

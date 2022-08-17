@@ -82,6 +82,13 @@ pub extern "C" fn write(fd: usize, buffer: *const u8, len: usize) -> isize {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn execv(path: *const c_char, args: *const c_char) -> isize {
+    unsafe {
+        syscall4(Syscall::EXECV, path as usize, c_str_len(path), args as usize, c_str_len(args))
+    }
+}
+
 unsafe fn c_str_len(ptr: *const c_char) -> usize {
     let mut count = 0;
 

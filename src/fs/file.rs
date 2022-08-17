@@ -1,4 +1,4 @@
-use alloc::sync::{Arc, Weak};
+use alloc::{sync::{Arc, Weak}, boxed::Box};
 use core::fmt::Debug;
 use spin::RwLock;
 
@@ -92,6 +92,20 @@ impl VirtualNode {
                 Some(Self::File(FileNode { file: weak.upgrade()? }))
             },
             _ => Some(self)
+        }
+    }
+
+    pub fn contents(&self) -> Option<Box<[u8]>> {
+        match self {
+            Self::File(node) => {
+                // TODO: return error instead of panic
+                Some(node.file.read().content().unwrap().to_vec().into_boxed_slice())
+            },
+            Self::WeakFile(weak) => {
+                // TODO: return error instead of panic
+                Some(weak.upgrade()?.read().content().unwrap().to_vec().into_boxed_slice())
+            }
+            _ => None
         }
     }
 

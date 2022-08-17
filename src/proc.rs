@@ -1,7 +1,9 @@
+use core::arch::asm;
 use core::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
 use core::ops::Bound::{Excluded, Unbounded};
 
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::collections::BTreeMap;
 
@@ -11,7 +13,7 @@ use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::arch::x86_64::context::enter_user;
 use crate::elf::Loader;
-use crate::fs::{VirtualNode, null_device};
+use crate::fs::{VirtualNode, null_device, Path, rootfs};
 use crate::interrupt::{enable_and_halt, disable_interrupts, without_interrupts, restore_interrupts};
 use crate::mm::AddressSpace;
 use crate::stack::{KernelStack, UserStack};
@@ -61,7 +63,7 @@ impl ProcessList {
             core_id: None,
             address_space: None,
             parent: None,
-            _kstack: None,
+            kstack: None,
             user_stack: None,
             entry_point: VirtAddr::new(0),
 
@@ -174,7 +176,7 @@ pub struct Task {
     pub parent: Option<usize>,
     pub core_id: Option<usize>,
     pub address_space: Option<Box<AddressSpace>>,
-    _kstack: Option<KernelStack>,
+    kstack: Option<KernelStack>,
 
     pub user_stack: Option<UserStack>,
     pub entry_point: VirtAddr,
@@ -210,7 +212,7 @@ impl Task {
             core_id: None,
             parent: Some(pid()),
             address_space: Some(address_space),
-            _kstack: Some(stack),
+            kstack: Some(stack),
             user_stack: None,
 
             entry_point,
@@ -274,6 +276,28 @@ impl Task {
         self.status = Status::Blocked(Wake::Time(end));
     }
 
+    /// Prepares the task for exec. This loads the elf file to execute, resets kernel and user
+    /// stacks and clears all existing usermode mappings. Once the kernel stack is reset this
+    /// method pushes `enter_user()` as a return address for when the outer `exec` function returns
+    fn prepare_exec(&mut self, path: Path, args: String) {
+        // TODO: early return errors
+        info!("Reading '{:?}' for exec", path);
+        let file = rootfs().read().get_file(&path).expect("Could not locate program image");
+        let image = file.contents().unwrap();
+
+        self.user_stack = None;
+        self.arch_context = Context::default();
+
+        // Setup a default kernel stack for the process
+        self.arch_context.set_rsp(self.kstack.as_ref().expect("No Kstack set in process object").top());
+        self.arch_context.push(enter_user as usize);
+
+        self.address_space.as_mut().expect("No address space for proc").remove_all().expect("Could not clear address space");
+
+        self.load_elf(&image).expect("Could not load image. Is it a valid elf file?");
+
+    }
+
     unsafe fn switch_to(&mut self, next: &mut Task) {
         // If the current process can be run again
         if self.status == Status::Running {
@@ -295,6 +319,32 @@ impl Drop for Task {
     }
 }
 
+/// Performs an exec for the current process
+/// Load the program image specified by the path and switch into the new program
+///
+/// This function will clear the existing state of the process e.g. the stack, address space etc.
+pub fn exec(path: Path, args: String) {
+    let stack_pointer;
+    {
+        if !args.is_empty() {
+            todo!("Implement exec args")
+        }
+        let current = process_list().current();
+        let mut lock = current.write();
+
+        lock.prepare_exec(path, args);
+        set_tss_rsp0(lock.arch_context.rsp());
+        stack_pointer = lock.arch_context.rsp();
+    }
+
+    // Set the stack pointer to return to the address we pushed earlier
+    // Do not use locals after this!
+    unsafe {
+        asm!("mov rsp, {}
+              ret ", in(reg) stack_pointer.as_u64());
+    }
+}
+
 #[track_caller]
 pub fn process_list<'l>() -> RwLockReadGuard<'l, ProcessList> {
     assert!(!crate::interrupt::interrupts_enabled());
@@ -307,20 +357,20 @@ pub fn process_list_mut<'l>() -> RwLockWriteGuard<'l, ProcessList> {
     PROCESS_LIST.write()
 }
 
-static TEST_ELF: &[u8] = include_bytes!("../target/userspace/test_user");
-static TEST_FS: &[u8] = include_bytes!("../target/userspace/test_fs");
-static TEST_FB: &[u8] = include_bytes!("../target/userspace/test_fb");
-
 extern "C" fn load_elf() {
-    process_list().current().write().load_elf(TEST_ELF).unwrap();
+    crate::syscall::handlers::execv(Path::from_str("/tmp/include/test_user"), String::new()).unwrap();
 }
 
 extern "C" fn load_elf_fs_test() {
-    process_list().current().write().load_elf(TEST_FS).unwrap();
+    crate::syscall::handlers::execv(Path::from_str("/tmp/include/test_fs"), String::new()).unwrap();
 }
 
 extern "C" fn load_elf_fb_test() {
-    process_list().current().write().load_elf(TEST_FB).unwrap();
+    crate::syscall::handlers::execv(Path::from_str("/tmp/include/test_fb"), String::new()).unwrap();
+}
+
+extern "C" fn load_elf_exec_test() {
+    crate::syscall::handlers::execv(Path::from_str("/tmp/include/test_exec"), String::new()).unwrap();
 }
 
 pub fn new_user_test() {
@@ -336,6 +386,11 @@ pub fn new_user_test() {
 
     let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
     task.write().arch_context.push(load_elf_fb_test as usize);
+
+    process_list_mut().insert(task).unwrap();
+
+    let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
+    task.write().arch_context.push(load_elf_exec_test as usize);
 
     process_list_mut().insert(task).unwrap();
 }
@@ -381,6 +436,10 @@ pub fn exit(_status: usize) {
         let current = process_list().current();
 
         current.write().status = Status::Dying;
+
+        if _status != 0 {
+            log::warn!("Exit status: {}", _status);
+        }
     }
 
     yield_time();

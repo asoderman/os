@@ -44,6 +44,9 @@ pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> im
         Syscall::RMFILE => {
             rmfile(UserPtr::try_from(b)?.to_path(c)?).map(|_| OK_VAL)
         }
+        Syscall::EXECV => {
+            execv(UserPtr::try_from(b)?.to_path(c)?, UserPtr::try_from(d)?.to_string(e)?).map(|_| OK_VAL)
+        }
         Syscall::SLEEP => sleep(b).map(|_| OK_VAL),
         Syscall::YIELD => yield_().map(|_| OK_VAL),
         Syscall::EXIT => do_exit(b),
