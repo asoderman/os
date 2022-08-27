@@ -19,6 +19,7 @@
 #![reexport_test_harness_main = "test_main"]
 #![recursion_limit = "1024"]
 
+#[macro_use]
 extern crate alloc;
 
 #[macro_use]

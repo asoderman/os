@@ -130,11 +130,13 @@ pub fn log_print(ptr: UserPtr, len: usize) -> Result<()> {
     Ok(())
 }
 
-pub fn open(path: Path) -> Result<usize> {
+pub fn open(path: Path, flags: OpenFlags) -> Result<usize> {
     log::info!("Opening: {:?}", path);
     let node = rootfs().read().get_file(&path).map_err(|_| SyscallError::Exist)?;
 
-    Ok(process_list().current().write().add_open_file(node.upgrade().unwrap()))
+    let fd = node.open(flags);
+
+    Ok(fd)
 }
 
 pub fn close(fd: usize) -> Result<()> {
@@ -177,6 +179,16 @@ pub fn execv(path: Path, args: String) -> Result <()> {
     crate::proc::exec(path, args);
     Ok(())
 }
+
+pub fn mkfifo(path: Path) -> Result<usize> {
+    // TODO: fifo direction enforcement
+    let fifo = Fifo::new_with_direction(FifoDirection::Writer);
+    rootfs().read().insert_node(path.clone(), fifo.into()).expect("Could not create FIFO");
+
+    let vnode = rootfs().read().get_file(&path).unwrap();
+    Ok(vnode.open(OpenFlags::empty()))
+}
+
 pub fn clone(func: VirtAddr, arg: usize) -> Result<isize> {
     use alloc::sync::Arc;
     use spin::rwlock::RwLock;

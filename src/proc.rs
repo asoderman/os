@@ -1,3 +1,5 @@
+mod ipc;
+
 use core::arch::asm;
 use core::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
 use core::ops::Bound::{Excluded, Unbounded};
@@ -20,6 +22,8 @@ use crate::mm::AddressSpace;
 use crate::stack::{KernelStack, UserStack};
 use crate::time::{Seconds, Time};
 use crate::arch::{{Context, VirtAddr}, x86_64::apic_id, x86_64::set_tss_rsp0};
+
+use self::ipc::{Message, IpcError};
 
 lazy_static! {
     static ref PROCESS_LIST: RwLock<ProcessList> = RwLock::new(ProcessList::new());
@@ -69,6 +73,7 @@ impl ProcessList {
             entry_point: VirtAddr::new(0),
 
             open_files: BTreeMap::new(),
+            pending_messages: Vec::new(),
 
             status: Status::NotRunnable,
 
@@ -247,6 +252,7 @@ impl Task {
             entry_point,
 
             open_files,
+            pending_messages: Vec::new(),
             status: Status::Ready,
             arch_context: context
         }))
@@ -267,6 +273,11 @@ impl Task {
         } else {
             Err(crate::fs::FsError::BadFd)
         }
+    }
+
+    pub fn add_pending_message(&mut self, message: Message) -> Result<(), IpcError> {
+        self.pending_messages.push(message);
+        Ok(())
     }
 
     fn runnable(&self) -> bool {
@@ -344,6 +355,10 @@ impl Drop for Task {
     fn drop(&mut self) {
         without_interrupts(|| {
             info!("Task {}, died!", self.id);
+
+            if self.id == 0 {
+                panic!("poop");
+            }
         });
     }
 }

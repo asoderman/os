@@ -1,4 +1,5 @@
 use alloc::{sync::{Arc, Weak}, boxed::Box};
+use syscall::flags::OpenFlags;
 use core::fmt::Debug;
 use spin::RwLock;
 
@@ -7,7 +8,7 @@ use super::{Error, FsError};
 use crate::{arch::VirtAddr, proc::process_list};
 
 pub trait File: Read + Write + Debug + Send + Sync {
-    fn open(&self) -> Result<(), Error> {
+    fn open(&self, flags: OpenFlags) -> Result<(), Error> {
         Ok(())
     }
     fn close(&self) -> Result<(), Error> {
@@ -74,6 +75,13 @@ impl<F: File + 'static> From<F> for VirtualNode {
 }
 
 impl VirtualNode {
+
+    fn file(&self) -> Option<&RwLock<dyn File>> {
+        match self {
+            VirtualNode::File(f) => Some(f.file.as_ref()),
+            _ => None,
+        }
+    }
     pub fn new_file<F: File + Default + 'static>() -> Self {
         Self::File(FileNode::new::<F>())
     }
@@ -137,11 +145,14 @@ impl VirtualNode {
     }
 
     /// Add this virtual node to the current process' open files list
-    pub fn open(&self) -> usize {
+    pub fn open(&self, flags: OpenFlags) -> usize {
         let current = process_list().current();
         let mut lock = current.write();
 
-        lock.add_open_file(self.clone())
+        let f = self.clone().upgrade().expect("Could not upgrade virtual node ref");
+        f.file().expect("opened non upgraded file").write().open(flags);
+
+        lock.add_open_file(f)
     }
 
     /// Invoke the implementation's close method

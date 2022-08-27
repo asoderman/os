@@ -7,6 +7,7 @@ use crate::env::env;
 
 pub use path::Path;
 
+mod fifo;
 mod file;
 mod filesystem;
 mod generic_file;
@@ -19,6 +20,7 @@ mod rootfs;
 use spin::RwLock;
 
 pub use generic_file::GenericFile;
+pub use fifo::{Fifo, FifoDirection};
 pub use file::VirtualNode;
 pub use filesystem::FSAttributes;
 
@@ -93,6 +95,7 @@ fn include_files() {
     include_file!("../../target/userspace/test_fs");
     include_file!("../../target/userspace/test_fb");
     include_file!("../../target/userspace/test_exec");
+    include_file!("../../target/userspace/test_clone");
 }
 
 pub fn init() {

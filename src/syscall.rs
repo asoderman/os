@@ -20,7 +20,7 @@ pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> im
     info!("Syscall no. : {:#X}", a);
     match a {
         Syscall::OPEN => {
-            open(UserPtr::try_from(b)?.to_path(c)?).map(|a| a as isize)
+            open(UserPtr::try_from(b)?.to_path(c)?, OpenFlags::from_bits(d).ok_or(SyscallError::InvalidFlags)?).map(|a| a as isize)
         },
         Syscall::CLOSE => close(b).map(|_| OK_VAL),
         Syscall::READ => {
