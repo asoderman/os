@@ -7,6 +7,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::collections::BTreeMap;
 
+use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use log::{info, trace};
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -182,9 +183,37 @@ pub struct Task {
     pub entry_point: VirtAddr,
 
     pub open_files: BTreeMap<usize, VirtualNode>,
+    pending_messages: Vec<Message>,
 
     status: Status,
     arch_context: Context,
+}
+
+impl Clone for Task {
+    fn clone(&self) -> Self {
+        let kstack = KernelStack::new();
+        log::info!("Cloned process rsp: {:?}", kstack.top());
+        let mut arch_context = self.arch_context.clone();
+        let address_space = AddressSpace::new_copy_on_write_from(self.address_space.as_ref().unwrap());
+        arch_context.set_cr3(address_space.phys_addr());
+        arch_context.set_rsp(kstack.top());
+
+        arch_context.push(enter_user as usize);
+
+        Self { 
+            id: next_id(),
+            parent: Some(self.id),
+            core_id: self.core_id.clone(),
+            address_space: Some(Box::new(address_space)),
+            kstack: Some(kstack),
+            user_stack: self.user_stack.clone(),
+            entry_point: VirtAddr::new(0),
+            open_files: self.open_files.clone(),
+            pending_messages: self.pending_messages.clone(),
+            status: Status::Ready,
+            arch_context
+        }
+    }
 }
 
 impl Task {
@@ -373,6 +402,10 @@ extern "C" fn load_elf_exec_test() {
     crate::syscall::handlers::execv(Path::from_str("/tmp/include/test_exec"), String::new()).unwrap();
 }
 
+extern "C" fn load_elf_clone_test() {
+    crate::syscall::handlers::execv(Path::from_str("/tmp/include/test_clone"), String::new()).unwrap();
+}
+
 pub fn new_user_test() {
     let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
     task.write().arch_context.push(load_elf as usize);
@@ -391,6 +424,11 @@ pub fn new_user_test() {
 
     let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
     task.write().arch_context.push(load_elf_exec_test as usize);
+
+    process_list_mut().insert(task).unwrap();
+
+    let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
+    task.write().arch_context.push(load_elf_clone_test as usize);
 
     process_list_mut().insert(task).unwrap();
 }

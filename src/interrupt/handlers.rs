@@ -1,15 +1,54 @@
 use core::sync::atomic::Ordering;
 
-use x86_64::structures::idt::InterruptStackFrame;
+use alloc::fmt::format;
+use x86_64::{structures::idt::InterruptStackFrame, VirtAddr};
 
 use super::{number::Interrupt, eoi};
 
-use crate::{proc::{switch_next, TICKS_ELAPSED, PANIC}, arch::x86_64::interrupt::InterruptStack};
+use crate::{proc::{switch_next, TICKS_ELAPSED, PANIC, process_list}, arch::x86_64::{interrupt::InterruptStack, set_fs_base_to_gs_base, restore_fs_base}, interrupt::without_interrupts, dev::serial::write_serial_out};
 
 fn page_fault(frame: InterruptStackFrame, _index: u8, error_code: Option<u64>) {
-    let cr2 = x86_64::registers::control::Cr2::read();
 
-    panic!("<Kernel Pagefault> e: {:#}\n --\n Cr2: {:?}\n{:?}", error_code.unwrap(), cr2, frame);
+    without_interrupts(|| {
+        //todo!("Check if fault was caused in usermode to re-enable thread locals if needed");
+        if frame.code_segment & 3 != 0 {
+            // fault coming from user
+            unsafe {
+                core::arch::asm!("swapgs");
+                set_fs_base_to_gs_base();
+            }
+
+        }
+        if frame.instruction_pointer < VirtAddr::new(0xFFFFFFFF80000000u64) {
+            let current = process_list().current();
+            let mut lock = current.write();
+            let address_space = &mut lock.address_space;
+            let address_space = address_space.as_mut().unwrap();
+            let mapping = address_space.mapping_containing(frame.instruction_pointer);
+
+            if let Some(mapping) = mapping {
+                if mapping.is_cow() {
+                    log::info!("#PF: Copy on write");
+                    mapping.perform_copy_on_write(address_space.page_table())
+                }
+            } else {
+                // According to the address space an unmapped area was accessed
+                todo!("Implement kill")
+            }
+        } else {
+            // Page fault in kernel. Something is wrong
+            panic!("<Kernel Pagefault> e: {:#}\n --\n Cr2: {:?}\n{:?}", error_code.unwrap(), frame.instruction_pointer, frame);
+        }
+        if frame.code_segment & 3 != 0 {
+            // fault coming from user
+            unsafe {
+                restore_fs_base();
+                core::arch::asm!("swapgs");
+            }
+
+        }
+    });
+
 }
 
 pub fn timer(_stack: &mut InterruptStack) {

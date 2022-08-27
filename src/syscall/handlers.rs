@@ -1,12 +1,12 @@
 use alloc::string::String;
-use alloc::sync::Arc;
 use syscall::error::SyscallError;
-use syscall::flags::MemoryFlags;
+use syscall::flags::{MemoryFlags, OpenFlags};
 
 use crate::arch::VirtAddr;
-use crate::fs::{rootfs, Path};
+
+use crate::fs::{rootfs, Path, Fifo, FifoDirection};
 use crate::mm::{user_map, user_unmap};
-use crate::proc::{process_list, yield_time, exit};
+use crate::proc::{process_list, yield_time, exit, process_list_mut};
 use crate::interrupt::{without_interrupts, disable_interrupts};
 
 use super::userptr::UserPtr;
@@ -176,4 +176,22 @@ pub fn rmfile(path: Path) -> Result<()> {
 pub fn execv(path: Path, args: String) -> Result <()> {
     crate::proc::exec(path, args);
     Ok(())
+}
+pub fn clone(func: VirtAddr, arg: usize) -> Result<isize> {
+    use alloc::sync::Arc;
+    use spin::rwlock::RwLock;
+
+    let child = 
+    {
+        let mut child = process_list().current().read().clone();
+        log::info!("Cloning pid: {:?} ", child.parent);
+        child.entry_point = func;
+        child
+    };
+
+    {
+        process_list_mut().insert(Arc::new(RwLock::new(child))).expect("Could not spawn clone");
+    }
+
+    Ok(1)
 }

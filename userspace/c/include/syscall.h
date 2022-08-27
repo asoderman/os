@@ -39,4 +39,6 @@ intptr_t write(uintptr_t fd, const uint8_t *buffer, uintptr_t len);
 
 intptr_t execv(const char *path, const char *args);
 
+intptr_t clone(void (**func)(uintptr_t), uintptr_t arg);
+
 struct MemoryFlags mflags_empty(void);
