@@ -43,6 +43,7 @@ bootloader: clean
 
 # Copy the binary to the uefi image
 update_dir OUTPUT:
+    -mkdir {{parent_directory(uefi_target)}}
     cp -r "{{OUTPUT}}" "{{uefi_target}}"
 
 update_and_run OUTPUT:
@@ -116,7 +117,7 @@ build_libsyscall_static:
     --output syscall.h \
     --lang c
 
-    -mkdir userspace/c/include
+    -mkdir -p userspace/c/include
 
     cp syscall/syscall.h userspace/c/include/syscall.h
     just modify_libsyscall_crate_type lib
