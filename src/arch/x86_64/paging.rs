@@ -8,12 +8,62 @@ use x86_64::{
     VirtAddr, PhysAddr,
 };
 
-use crate::mm::phys_to_virt;
+use crate::mm::{phys_to_virt, physical_memory_manager};
 
 const MAX_PAGE_ENTRIES: usize = 512;
 
 const MAX_PAGE_LEVEL: usize = 4;
 
+pub trait PageTableOps {
+    fn deep_copy(&self) -> *mut Self;
+}
+
+impl PageTableOps for PageTable {
+    /// Performs a deep (recursive) copy on a Page Table that copies the structure of the page table but does
+    /// not copy the underlying data.
+    ///
+    /// # Safety
+    /// This method must only be called on a level 4 page table
+    fn deep_copy(&self) -> *mut Self {
+        unsafe fn deep_copy_inner(pt: &PageTable, level: usize) -> (*mut PageTable, PhysAddr) {
+            let new_page_table = allocate_page_table();
+
+            for (i, entry) in pt.iter().enumerate() {
+                if !entry.is_unused() {
+                    if level == 4 && i > 509 {
+                        new_page_table.0.as_mut().unwrap()[i].clone_from(entry);
+                        continue;
+                    } else if level == 1 {
+                        // If the bottom level is reached copy the page table entry which should point
+                        // to a physical frame
+                        new_page_table.0.as_mut().unwrap()[i].clone_from(entry);
+                    } else {
+                        // Otherwise create a new page table and configure it the same way as the
+                        // source page table
+                        let pointed_to_page_table: *mut PageTable = phys_to_virt(entry.addr()).as_mut_ptr();
+                        let copy = deep_copy_inner(pointed_to_page_table.as_mut().unwrap(), level - 1);
+
+                        // Set the corresponding entry to the copied page table and keep the flags
+                        new_page_table.0.as_mut().unwrap()[i].set_addr(copy.1, entry.flags())
+                    }
+                }
+            }
+
+            new_page_table
+        }
+
+        unsafe {
+            deep_copy_inner(self, 4).0
+        }
+    }
+}
+
+fn allocate_page_table() -> (*mut PageTable, PhysAddr) {
+    let phys = physical_memory_manager().lock().allocate_frame();
+    (phys_to_virt(phys).as_mut_ptr(), phys)
+}
+
+/// RAII TLB Flush guard
 pub struct Flusher(VirtAddr);
 
 impl Drop for Flusher {
@@ -316,6 +366,18 @@ impl<'a> Mapper<'a> {
         Ok(Flusher(self.addr))
     }
 
+    /// Clears the provided flags ONLY in the top-most page table i.e. PML4
+    pub fn clear_highest_level_flags(&mut self, flags: PageTableFlags) -> Result<Flusher, MapError> {
+        assert!(self.current_level == MAX_PAGE_LEVEL, "Attempted to clear highest level flags while mapper is not set to highest page table");
+        if self.next_entry().is_unused() { Err(MapError::NotPresent)? }
+
+        let new = self.next_entry().flags() & !flags;
+
+        self.next_entry().set_flags(new);
+
+        Ok(Flusher(self.addr))
+    }
+
     fn current_is_empty(&mut self) -> bool {
         self.current().iter().map(|e| e.is_unused()).fold(true, |acc, elem| acc && elem)
     }
@@ -370,6 +432,7 @@ impl<'a> Mapper<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_cr3() -> PhysAddr {
     x86_64::registers::control::Cr3::read().0.start_address()
 }
@@ -402,5 +465,34 @@ mod test {
         let walk_result = pt_walker.advance();
         assert!(walk_result.is_err(), "page level 1 should not exist because huge page");
         assert!(walk_result.unwrap_err() == MapError::HugeFrame(2), "Expected huge page");
+    }
+
+    #[test_case]
+    fn test_page_table_copy() {
+        let (test_page_table, _test_page_table_phys) = allocate_page_table();
+
+        unsafe {
+            let mut mapper = Mapper::new(VirtAddr::new(0x1000), test_page_table.as_mut().unwrap());
+            // TODO: dependency injection for frame allocator in tests
+            mapper.map(&mut *physical_memory_manager().lock()).expect("Could not create test mapping");
+
+            drop(mapper);
+
+            let mut mapper = Mapper::new(VirtAddr::new(0x1000), test_page_table.as_mut().unwrap());
+            let (test_phys_frame, _) = mapper.get_phys_frame().unwrap();
+
+            let copy_page_table = test_page_table.as_mut().unwrap().deep_copy();
+
+            let mut copy_mapper = Mapper::new(VirtAddr::new(0x1000), copy_page_table.as_mut().unwrap());
+
+            let (phys_frame, _is_huge) = copy_mapper.get_phys_frame().unwrap();
+
+            assert_ne!(phys_frame.as_u64(), 0u64);
+            assert_ne!(copy_page_table, test_page_table);
+            assert_eq!(test_phys_frame, phys_frame);
+        }
+
+        // TODO: cleanup
+
     }
 }

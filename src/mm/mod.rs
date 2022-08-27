@@ -17,7 +17,7 @@ pub use pmm::get_init_heap_section;
 pub use error::MemoryManagerError;
 
 use self::mapping::Mapping;
-use self::pmm::physical_memory_manager;
+pub use self::pmm::physical_memory_manager;
 use self::vmm::{VirtualMemoryError, get_kernel_context_virt};
 
 pub use self::vmm::{VirtualRegion, AddressSpace, };

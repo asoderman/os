@@ -32,7 +32,9 @@ mod syscall;
 pub mod timers;
 
 pub use gdt::set_tss_rsp0;
-pub use smp::thread_local::set_fs_base_to_gs_base;
+pub use smp::thread_local::{set_fs_base_to_gs_base, restore_fs_base};
+
+pub use paging::PageTableOps;
 
 /// Initialize as many platform components as we can here.
 pub fn platform_init() {
