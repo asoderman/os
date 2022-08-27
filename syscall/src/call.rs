@@ -89,6 +89,13 @@ pub extern "C" fn execv(path: *const c_char, args: *const c_char) -> isize {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn clone(func: *const extern "C" fn(usize), arg: usize) -> isize {
+    unsafe {
+        syscall2(Syscall::CLONE, func as usize, arg)
+    }
+}
+
 unsafe fn c_str_len(ptr: *const c_char) -> usize {
     let mut count = 0;
 

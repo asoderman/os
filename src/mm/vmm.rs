@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::Mutex;
 use x86_64::structures::paging::PageTable;
-use crate::arch::x86_64::PageSize;
+use crate::arch::x86_64::{PageSize, PageTableOps};
 use crate::arch::{VirtAddr, PhysAddr, PAGE_SIZE};
 use crate::env::memory_layout;
 use core::fmt::Debug;
@@ -161,6 +161,25 @@ impl AddressSpace {
         }
     }
 
+    /// Clones the highest page table and its `Mapping`s. Clears the `Mapping`s writeable flag and
+    /// sets a COW attribute that is checked during a write page fault
+    pub fn new_copy_on_write_from(src: &AddressSpace) -> Self {
+        let top_level_page_table = src.page_table_clone();
+
+        let mappings = src.mappings.iter().cloned().map(|mapping| {
+            unsafe {
+                let mut new_mapping = (*mapping).clone();
+                new_mapping.cow(top_level_page_table.as_mut().unwrap());
+                Arc::new(new_mapping)
+            }
+        }).collect();
+
+        Self {
+            page_table: Unique::new(top_level_page_table).unwrap(),
+            mappings,
+        }
+    }
+
     /// Clones the kernel address space but the result will not have access to the mappings resulting in an
     /// "empty" address space but has the correct kernel page table setup
     pub fn new_user_from_kernel() -> Self {
@@ -174,6 +193,14 @@ impl AddressSpace {
     pub fn page_table(&mut self) -> &mut PageTable {
         unsafe {
             self.page_table.as_mut()
+        }
+    }
+
+    /// Clones the highest level page table
+    fn page_table_clone(&self) -> *mut PageTable {
+        // FIXME: return level 4 page table frame to pmm
+        unsafe {
+            self.page_table.as_ref().deep_copy()
         }
     }
 

@@ -3,8 +3,8 @@ use log::warn;
 use spin::RwLock;
 use x86_64::{structures::paging::{PageTable, PageTableFlags}, VirtAddr};
 
-use super::{vmm::{VirtualRegion, VirtualMemoryError}, frame_allocator::FrameAllocator, AddressSpace};
-use crate::arch::{PhysAddr, x86_64::{paging::{Mapper, MapError}, PageSize}, PAGE_SIZE};
+use super::{vmm::{VirtualRegion, VirtualMemoryError}, frame_allocator::FrameAllocator, AddressSpace, pmm::physical_memory_manager};
+use crate::{arch::{PhysAddr, x86_64::{paging::{Mapper, MapError}, PageSize}, PAGE_SIZE}, mm::phys_to_virt};
 
 use bitflags::bitflags;
 
@@ -18,13 +18,14 @@ bitflags! {
         const WRITE = 0b10;
         const EXECUTABLE = 0b100;
         const HUGE = 0b01000000;
+        const COPY_ON_WRITE = 0b00100000;
         // Permissions
         const EX = Attributes::EXECUTABLE.bits | Attributes::READ.bits;
         const RW = Attributes::READ.bits | Attributes::WRITE.bits;
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MappingType {
     KernelCode,
     KernelData,
@@ -42,6 +43,16 @@ pub struct Mapping {
     kind: MappingType,
     // Use Cell to allow us to modify attributes while the mapping is in the list
     attr: RwLock<Attributes>
+}
+
+impl Clone for Mapping {
+    fn clone(&self) -> Self {
+        Self { 
+            range: self.range.clone(),
+            kind: self.kind.clone(),
+            attr: RwLock::new(Attributes::from_bits(self.attr.read().bits()).unwrap())
+        }
+    }
 }
 
 impl Ord for Mapping {
@@ -146,6 +157,10 @@ impl Mapping {
         self.range.size
     }
 
+    pub fn is_cow(&self) -> bool {
+        self.attr.read().contains(Attributes::COPY_ON_WRITE)
+    }
+
     #[allow(dead_code)]
     pub fn is_read_only(&self) -> bool {
         !self.attr.read().contains(Attributes::RW)
@@ -185,6 +200,55 @@ impl Mapping {
             let mut mapper = Mapper::new(p, pt);
             mapper.set_flags(PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE).unwrap();
         }
+    }
+
+    /// Marks a mapping as `COPY_ON_WRITE`.
+    ///
+    /// On a hardware level this disables the write bit on the mapping so once a write is issued to
+    /// this mapping a page fault will occur where the page fault handler will create a new copy of
+    /// this data
+    pub fn cow(&mut self, pt: &mut PageTable) {
+        for p in self.virt_range().pages() {
+            let mut mapper = Mapper::new(p, pt);
+            // Disable writing
+            mapper.clear_highest_level_flags(PageTableFlags::WRITABLE).unwrap();
+        }
+
+        self.set_attr(Attributes::COPY_ON_WRITE)
+    }
+
+    /// Perfrom the data copy on write. Remaps the address to a clean physical frame and perfroms a
+    /// physical buffer copy between the old and new frame
+    ///
+    /// # Safety 
+    /// The copy mapping is marked as writable. Do not use this on read only data.
+    pub fn perform_copy_on_write(&self, pt: &mut PageTable) {
+        log::info!("Copying {:?} - {:?}", self.virt_range().start, self.virt_range().end());
+        for page_addr in self.virt_range().pages() {
+            let mut mapper = Mapper::new(page_addr, pt);
+            let copy_frame = mapper.get_phys_frame().unwrap();
+
+            let mut mapper = Mapper::new(page_addr, pt);
+            mapper.unmap(&mut *physical_memory_manager().lock(), false).expect("Could not unmap data to copy");
+
+            let dst_frame = physical_memory_manager().lock().allocate_frame();
+            let mut mapper = Mapper::new(page_addr, pt);
+            mapper.map_frame(dst_frame, &mut *physical_memory_manager().lock()).expect("Could not map new frame to address");
+
+            let mut mapper = Mapper::new(page_addr, pt);
+            mapper.set_flags(PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE).unwrap();
+
+            // Perform a buffer copy
+            for i in (0..PAGE_SIZE).step_by(PAGE_SIZE / 4) {
+                unsafe {
+                    let src_buffer: &[u8] = core::slice::from_raw_parts((phys_to_virt(copy_frame.0).as_ptr() as *const u8).add(i), PAGE_SIZE / 4);
+                    let dst_buffer: &mut [u8] = core::slice::from_raw_parts_mut((phys_to_virt(dst_frame).as_mut_ptr() as *mut u8).add(i), PAGE_SIZE / 4);
+
+                    dst_buffer.copy_from_slice(src_buffer);
+                }
+            }
+        }
+
     }
 
     /// Map the pages to the provided frames

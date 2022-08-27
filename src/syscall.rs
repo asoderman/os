@@ -1,12 +1,13 @@
 use log::info;
 use syscall::number::Syscall;
 use syscall::error::SyscallError;
-use syscall::flags::MemoryFlags;
+use syscall::flags::{MemoryFlags, OpenFlags};
 
 pub mod handlers;
 pub mod userptr;
 
 pub use handlers::*;
+use x86_64::VirtAddr;
 
 use crate::syscall::userptr::UserPtr;
 
@@ -43,6 +44,10 @@ pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> im
         }
         Syscall::RMFILE => {
             rmfile(UserPtr::try_from(b)?.to_path(c)?).map(|_| OK_VAL)
+        }
+        Syscall::CLONE => {
+            // TODO: validate the fn ptr VirtAddr is in userspace!
+            clone(VirtAddr::new(b as u64), c)
         }
         Syscall::EXECV => {
             execv(UserPtr::try_from(b)?.to_path(c)?, UserPtr::try_from(d)?.to_string(e)?).map(|_| OK_VAL)

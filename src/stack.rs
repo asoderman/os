@@ -16,7 +16,8 @@ static STARTING_KERNEL_STACK_ADDR: Once<u64> = Once::new();
 const KERNEL_STACK_SIZE: usize = 4;
 const KERNEL_STACK_SIZE_BYTES: usize = KERNEL_STACK_SIZE * PAGE_SIZE;
 
-#[derive(Debug)]
+// FIXME: dont derive clone because the derived version is ambiguous 
+#[derive(Debug, Clone)]
 pub struct UserStack {
     base: VirtAddr,
     pages: usize
