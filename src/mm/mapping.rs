@@ -226,10 +226,15 @@ impl Mapping {
         log::info!("Copying {:?} - {:?}", self.virt_range().start, self.virt_range().end());
         for page_addr in self.virt_range().pages() {
             let mut mapper = Mapper::new(page_addr, pt);
-            let copy_frame = mapper.get_phys_frame().unwrap();
+            //let copy_frame = mapper.get_phys_frame().unwrap();
 
+            mapper.walk();
+            let copy_frame = (mapper.unmap_next().unwrap(), 0);
+
+            /*
             let mut mapper = Mapper::new(page_addr, pt);
             mapper.unmap(&mut *physical_memory_manager().lock(), false).expect("Could not unmap data to copy");
+            */
 
             let dst_frame = physical_memory_manager().lock().allocate_frame();
             let mut mapper = Mapper::new(page_addr, pt);
@@ -248,7 +253,6 @@ impl Mapping {
                 }
             }
         }
-
     }
 
     /// Map the pages to the provided frames

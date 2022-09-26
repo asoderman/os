@@ -47,11 +47,15 @@ pub fn syscall(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> im
         }
         Syscall::CLONE => {
             // TODO: validate the fn ptr VirtAddr is in userspace!
-            clone(VirtAddr::new(b as u64), c)
+            let result = clone(VirtAddr::new(b as u64), c);
+            log::info!("Clone result {:?}", result);
+
+            result
         }
         Syscall::EXECV => {
             execv(UserPtr::try_from(b)?.to_path(c)?, UserPtr::try_from(d)?.to_string(e)?).map(|_| OK_VAL)
         }
+        Syscall::MKFIFO => mkfifo(UserPtr::try_from(b)?.to_path(c)?),
         Syscall::SLEEP => sleep(b).map(|_| OK_VAL),
         Syscall::YIELD => yield_().map(|_| OK_VAL),
         Syscall::EXIT => do_exit(b),

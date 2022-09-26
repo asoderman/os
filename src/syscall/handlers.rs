@@ -6,7 +6,7 @@ use crate::arch::VirtAddr;
 
 use crate::fs::{rootfs, Path, Fifo, FifoDirection};
 use crate::mm::{user_map, user_unmap};
-use crate::proc::{process_list, yield_time, exit, process_list_mut};
+use crate::proc::{process_list, yield_time, exit, process_list_mut, pid};
 use crate::interrupt::{without_interrupts, disable_interrupts};
 
 use super::userptr::UserPtr;
@@ -144,19 +144,26 @@ pub fn close(fd: usize) -> Result<()> {
 }
 
 pub fn read(fd: usize, buffer: &mut [u8]) -> Result<usize> {
+    log::info!("Reading fd {}", fd);
     let current = process_list().current();
     let lock = current.read();
     let vnode = lock.open_files.get(&fd).ok_or(SyscallError::InvalidFd)?;
 
-    vnode.read(buffer).map_err(|_| SyscallError::FsError)
+    let res = vnode.read(buffer).map_err(|_| SyscallError::FsError);
+    log::info!("success");
+    res
 }
 
 pub fn write(fd: usize, buffer: &[u8]) -> Result<usize> {
+    log::info!("writing {} to fd: {}", String::from_utf8(buffer.to_vec()).unwrap(), fd);
     let current = process_list().current();
     let lock = current.read();
     let vnode = lock.open_files.get(&fd).ok_or(SyscallError::InvalidFd)?;
 
-    vnode.write(buffer).map_err(|_| SyscallError::FsError)
+    let res = vnode.write(buffer).map_err(|_| SyscallError::FsError);
+    log::info!("ok");
+
+    res
 }
 
 pub fn mkdir(path: Path) -> Result<()> {
@@ -180,13 +187,14 @@ pub fn execv(path: Path, args: String) -> Result <()> {
     Ok(())
 }
 
-pub fn mkfifo(path: Path) -> Result<usize> {
+pub fn mkfifo(path: Path) -> Result<isize> {
+    log::info!("Creating fifo: {:?}", path);
     // TODO: fifo direction enforcement
     let fifo = Fifo::new_with_direction(FifoDirection::Writer);
     rootfs().read().insert_node(path.clone(), fifo.into()).expect("Could not create FIFO");
 
     let vnode = rootfs().read().get_file(&path).unwrap();
-    Ok(vnode.open(OpenFlags::empty()))
+    Ok(vnode.open(OpenFlags::empty()) as isize)
 }
 
 pub fn clone(func: VirtAddr, arg: usize) -> Result<isize> {
@@ -205,5 +213,6 @@ pub fn clone(func: VirtAddr, arg: usize) -> Result<isize> {
         process_list_mut().insert(Arc::new(RwLock::new(child))).expect("Could not spawn clone");
     }
 
+    log::info!("{} returning from clone", pid());
     Ok(1)
 }

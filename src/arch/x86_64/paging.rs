@@ -485,7 +485,7 @@ mod test {
 
             let mut copy_mapper = Mapper::new(VirtAddr::new(0x1000), copy_page_table.as_mut().unwrap());
 
-            let (phys_frame, _is_huge) = copy_mapper.get_phys_frame().unwrap();
+            let (phys_frame, _) = copy_mapper.get_phys_frame().unwrap();
 
             assert_ne!(phys_frame.as_u64(), 0u64);
             assert_ne!(copy_page_table, test_page_table);

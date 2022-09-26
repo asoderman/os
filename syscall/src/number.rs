@@ -32,3 +32,4 @@ syscall_number!(RMDIR, 14);
 syscall_number!(STAT, 15);
 syscall_number!(EXECV, 16);
 syscall_number!(CLONE, 17);
+syscall_number!(MKFIFO, 18);

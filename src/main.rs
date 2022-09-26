@@ -125,6 +125,7 @@ pub fn idle() {
 
         loop {
             println!("Hello from pid: {}, core: {}", proc::pid(), arch::x86_64::apic_id());
+            println!("Pids: {:?}", proc::process_list().pids());
             syscall::sleep(2);
         }
     });

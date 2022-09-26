@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use log::{info, trace};
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use syscall::flags::OpenFlags;
 
 use crate::arch::x86_64::context::enter_user;
 use crate::elf::Loader;
@@ -155,6 +156,10 @@ impl ProcessList {
     pub fn spawn(&mut self, f: fn()) {
         let task = Task::new(next_id(), VirtAddr::new(f as u64));
         self.insert(task).unwrap();
+    }
+
+    pub fn pids(&self) -> Vec<usize> {
+        self.list.keys().cloned().collect()
     }
 }
 
@@ -355,10 +360,6 @@ impl Drop for Task {
     fn drop(&mut self) {
         without_interrupts(|| {
             info!("Task {}, died!", self.id);
-
-            if self.id == 0 {
-                panic!("poop");
-            }
         });
     }
 }
@@ -421,7 +422,12 @@ extern "C" fn load_elf_clone_test() {
     crate::syscall::handlers::execv(Path::from_str("/tmp/include/test_clone"), String::new()).unwrap();
 }
 
+extern "C" fn load_elf_fifo_test() {
+    crate::syscall::handlers::execv(Path::from_str("/tmp/include/test_fifo"), String::new()).unwrap();
+}
+
 pub fn new_user_test() {
+    /*
     let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
     task.write().arch_context.push(load_elf as usize);
 
@@ -444,6 +450,12 @@ pub fn new_user_test() {
 
     let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
     task.write().arch_context.push(load_elf_clone_test as usize);
+
+    process_list_mut().insert(task).unwrap();
+    */
+
+    let task = Task::new(next_id(), VirtAddr::new(enter_user as u64));
+    task.write().arch_context.push(load_elf_fifo_test as usize);
 
     process_list_mut().insert(task).unwrap();
 }
@@ -487,6 +499,8 @@ pub fn yield_time() {
 pub fn exit(_status: usize) {
     {
         let current = process_list().current();
+
+        log::info!("{} exiting", current.read().id);
 
         current.write().status = Status::Dying;
 

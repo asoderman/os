@@ -96,6 +96,7 @@ fn include_files() {
     include_file!("../../target/userspace/test_fb");
     include_file!("../../target/userspace/test_exec");
     include_file!("../../target/userspace/test_clone");
+    include_file!("../../target/userspace/test_fifo");
 }
 
 pub fn init() {

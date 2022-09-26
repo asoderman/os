@@ -41,4 +41,6 @@ intptr_t execv(const char *path, const char *args);
 
 intptr_t clone(void (**func)(uintptr_t), uintptr_t arg);
 
+intptr_t mkfifo(const char *path);
+
 struct MemoryFlags mflags_empty(void);

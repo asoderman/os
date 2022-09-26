@@ -96,6 +96,13 @@ pub extern "C" fn clone(func: *const extern "C" fn(usize), arg: usize) -> isize 
     }
 }
 
+#[no_mangle]
+pub extern "C" fn mkfifo(path: *const c_char) -> isize {
+    unsafe {
+        syscall2(Syscall::MKFIFO, path as usize, c_str_len(path))
+    }
+}
+
 unsafe fn c_str_len(ptr: *const c_char) -> usize {
     let mut count = 0;
 

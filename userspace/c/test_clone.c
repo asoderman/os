@@ -14,7 +14,7 @@ int main(void) {
 
     clone(clone_main, 0);
 
-    while (1) {}
+    while(1) {}
 
     exit(0);
     return 0;

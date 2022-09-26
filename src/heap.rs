@@ -32,7 +32,7 @@ pub fn init_heap(
     mem_map: MemoryMapInfo,
     phys_offset: VirtAddr,
 ) -> Result<(VirtAddr, VirtAddr), HeapInitError> {
-    let heap_frame_range = get_init_heap_section(16, mem_map).map_err(|e| HeapInitError(e))?;
+    let heap_frame_range = get_init_heap_section(32, mem_map).map_err(|e| HeapInitError(e))?;
 
     let heap_start = phys_offset.as_u64() + heap_frame_range.start.start_address().as_u64();
     let heap_end_exclusive = phys_offset + heap_frame_range.end.start_address().as_u64();

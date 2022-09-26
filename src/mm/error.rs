@@ -6,7 +6,7 @@ use super::pmm::PhysicalMemoryError;
 use crate::error::Error;
 
 #[derive(Debug)]
-pub struct MemoryManagerError(Box<dyn Error>);
+pub struct MemoryManagerError(pub Box<dyn Error>);
 
 impl Error for MemoryManagerError {
     fn source(&self) -> Option<&Box<dyn Error>> {

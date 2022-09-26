@@ -3,7 +3,7 @@ use xmas_elf::program::Type;
 use xmas_elf::{ElfFile, header::Header};
 
 use crate::arch::{VirtAddr, PAGE_SIZE};
-use crate::mm::user_map;
+use crate::mm::{user_map, MemoryManagerError};
 use crate::proc::Task;
 use crate::stack::UserStack;
 
@@ -45,15 +45,28 @@ impl Loader for Task {
                     // Load program sections
 
                     let mem_size = p_header.mem_size() as usize;
+                    info!("mem_size: {:X}", mem_size);
 
                     let header_addr = VirtAddr::new(p_header.virtual_addr());
                     let virt_offset =  (header_addr.as_u64() - header_addr.as_u64()) as usize;
                     let virt_end = virt_offset as usize + mem_size;
 
-                    let pages = core::cmp::max(mem_size / PAGE_SIZE, 1);
+                    let crosses_page_boundary = if header_addr.as_u64() as usize / PAGE_SIZE < (header_addr + mem_size).as_u64() as usize / PAGE_SIZE { 1 } else { 0 };
+
+                    // round up and add to end if page boundary is crossed
+                    let pages = ((mem_size + (PAGE_SIZE - 1)) / PAGE_SIZE) + crosses_page_boundary;
+
+                    info!("Mapping {} pages for elf", pages);
 
                     // FIXME: allow overlapping mappings since headers can exist within the same page
-                    user_map(self, header_addr.align_down(0x1000u64), pages).unwrap();
+                    match user_map(self, header_addr.align_down(0x1000u64), pages) {
+                        Ok(_) => (),
+                        Err(MemoryManagerError(e)) => {
+                            log::warn!("{:?}", e);
+                            log::warn!("Elf loader memory map overlap");
+                        },
+                        _ => panic!("Map error in elf loader"),
+                    }
 
                     trace!("v_offset: {:X} v_end: {:X}", virt_offset, virt_end);
                     let f_offset =  p_header.offset() as usize;

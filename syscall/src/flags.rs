@@ -18,7 +18,8 @@ bitflags! {
     pub struct OpenFlags: usize {
         const READ = 1;
         const WRITE = 1 << 1;
-        const CREATE = 1 << 1;
+        const CREATE = 1 << 2;
+        const CLO_EXEC = 1 << 3;
     }
 }
 

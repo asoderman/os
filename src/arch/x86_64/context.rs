@@ -52,6 +52,7 @@ impl Context {
 /// Enters userspace via sysret
 pub extern "C" fn enter_user() -> ! {
     crate::interrupt::disable_interrupts();
+    log::info!("entering usermode");
     let entry;
     let ss: usize;
     let stack;
@@ -60,6 +61,7 @@ pub extern "C" fn enter_user() -> ! {
         let current = crate::proc::process_list().current();
 
         entry = current.read().entry_point.as_u64() as usize;
+        log::info!("usermode entry: {:X?}", entry);
         stack = current.read().user_stack.as_ref().unwrap().rsp().as_u64() as usize;
         ss = ((USER_DS_INDEX.get().copied().unwrap() as usize) << 3) | 3;
     }

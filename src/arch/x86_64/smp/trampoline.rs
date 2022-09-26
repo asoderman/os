@@ -107,7 +107,7 @@ impl Trampoline {
 }
 
 pub(super) fn wait_for_core(lapic_id: usize) {
-    while !SMP_CORES_READY.get(lapic_id).expect("Invalid lapic id").load(Ordering::Acquire) {
+    while !SMP_CORES_READY.get(lapic_id).expect("Invalid lapic id").load(Ordering::SeqCst) {
         core::hint::spin_loop();
     }
 }
@@ -116,7 +116,7 @@ pub(super) fn wait_for_core(lapic_id: usize) {
 pub extern "C" fn ap_entry(lapic_id: usize) {
     println!("ap_entry lapic_id: {}", lapic_id);
     crate::arch::x86_64::ap_init(lapic_id);
-    SMP_CORES_READY[super::this_core().local_apic_id as usize].store(true, Ordering::Release);
+    SMP_CORES_READY[super::this_core().local_apic_id as usize].store(true, Ordering::SeqCst);
 
     for (i, core) in SMP_CORES_READY.iter().enumerate() {
         println!("core {} ready:{:?}", i, core);

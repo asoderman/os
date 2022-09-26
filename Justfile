@@ -9,7 +9,7 @@ bootloader_src_dir := "../kloader/"
 qemu_success_value := "33"
 
 # m1 mac cannot properly run SMP cores
-CPU_CORES := if os() == "macos" { "1" } else { "4" }
+CPU_CORES := if os() == "macos" { "1" } else { "1" }
 
 #macos
 OVMF_DIR_macos := "/usr/local/ovmf/OVMF.fd/OVMF_CODE-pure-efi.fd"
